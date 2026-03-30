@@ -113,9 +113,9 @@ process_item() {
   # LLM analysis
   local system_prompt user_prompt
   if [[ "$type" == "issue" ]]; then
-    system_prompt="You are a project manager agent. Analyze the following GitHub issue and break it down into actionable sub-tasks. Provide clear instructions for an automated workflow to execute."
+    system_prompt="You are a project manager agent. Analyze the following GitHub issue and break it down into actionable sub-tasks. Provide clear instructions for an automated workflow to execute. Respond with your analysis directly — do NOT use any tools, do NOT browse files, do NOT run commands. Just analyze the issue text and produce a plan."
   else
-    system_prompt="You are a project manager agent. Analyze the following GitHub pull request and break it down into actionable review tasks. Provide clear instructions for an automated workflow to execute."
+    system_prompt="You are a project manager agent. Analyze the following GitHub pull request and break it down into actionable review tasks. Provide clear instructions for an automated workflow to execute. Respond with your analysis directly — do NOT use any tools, do NOT browse files, do NOT run commands. Just analyze the PR text and produce a plan."
   fi
 
   user_prompt="Repository: ${repo}
