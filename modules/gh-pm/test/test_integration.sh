@@ -36,4 +36,24 @@ assert_eq "0" "$rc" "handles pre-existing task"
 assert_contains "$output" "completed" "recovery processes completed task"
 teardown_test_env
 
+# --- Test: bash -n syntax check catches no 'local' outside functions ---
+# Regression test for the crash-loop bug where 'local pr_author' was used
+# in the main while-loop (not inside a function). bash -n validates syntax.
+output="$(bash -n "${GH_PM_DIR}/bin/gh-pm" 2>&1)"
+rc=$?
+assert_eq "0" "$rc" "bash -n syntax check passes (no local outside function)"
+
+# --- Test: no 'local' keyword in main loop body ---
+# Extract the main loop (after last function definition) and ensure no 'local' usage.
+# Functions are defined before the main loop; the main loop starts with 'while true'.
+main_script="${GH_PM_DIR}/bin/gh-pm"
+loop_start=$(grep -n '^while true; do$' "$main_script" | tail -1 | cut -d: -f1)
+if [[ -n "$loop_start" ]]; then
+  # Extract from loop start to end of file and look for bare 'local' statements
+  local_in_loop=$(sed -n "${loop_start},\$p" "$main_script" | grep -c '^[[:space:]]*local ' || true)
+  assert_eq "0" "$local_in_loop" "no 'local' keyword in main loop body"
+else
+  assert_eq "found" "" "main loop 'while true' not found in script"
+fi
+
 print_test_summary
