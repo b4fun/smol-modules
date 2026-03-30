@@ -284,15 +284,12 @@ Useful for:
 
 ## Running as a systemd Service
 
-For long-running deployments, install gh-pm as a systemd user service. A sample unit file is provided at [`gh-pm.service`](./gh-pm.service).
+gh-pm ships with an install script that sets it up as a **systemd user unit** — no root required.
 
-### Quick Setup
+### Install
 
 ```bash
-# 1. Copy and edit the unit file (replace YOUR_USER with your username)
-sudo cp modules/gh-pm/gh-pm.service /etc/systemd/system/gh-pm@.service
-
-# 2. Create an environment file for API keys
+# 1. Create an environment file with your API keys
 mkdir -p ~/.gh-pm
 cat > ~/.gh-pm/env <<'EOF'
 OPENAI_API_KEY=sk-...
@@ -300,45 +297,69 @@ OPENAI_API_KEY=sk-...
 EOF
 chmod 600 ~/.gh-pm/env
 
-# 3. Uncomment the EnvironmentFile line in the unit file
-sudo systemctl edit gh-pm@YOUR_USER --force
-# Add under [Service]:
-#   EnvironmentFile=/home/YOUR_USER/.gh-pm/env
+# 2. Run the installer
+bash modules/gh-pm/install.sh
 
-# 4. Enable and start
-sudo systemctl daemon-reload
-sudo systemctl enable --now gh-pm@YOUR_USER
-
-# 5. Check status and logs
-systemctl status gh-pm@YOUR_USER
-journalctl -u gh-pm@YOUR_USER -f
+# 3. Start the service
+systemctl --user start gh-pm.service
 ```
 
-### Unit File Overview
+The installer:
+- Generates a unit file in `~/.config/systemd/user/gh-pm.service`
+- Auto-detects the `gh-pm` binary path (override with `--exec-start PATH`)
+- Loads API keys from `~/.gh-pm/env` if it exists (override with `--env-file PATH`)
+- Enables `loginctl enable-linger` so the service **runs at boot and survives logout**
+- Checks that required dependencies (`gh`, `jq`, `toml2json`, `curl`) are in PATH
 
-The provided `gh-pm.service` is a **template unit** (`gh-pm@.service`) — the `%i` / `%I` specifier is replaced with the username you pass after `@`:
+### Linger: Running After Logout
 
-```ini
-# Instantiate for user "deploy":
-sudo systemctl start gh-pm@deploy
-# This runs as User=deploy, reads config from /home/deploy/.gh-pm/
+By default, systemd user units **only run while the user has an active login session**. When the last session ends (SSH disconnect, logout), all user units stop.
+
+The install script enables **linger** to change this behavior:
+
+```bash
+loginctl enable-linger $USER
 ```
 
-Key settings in the unit file:
+With linger enabled:
+- gh-pm starts at boot (no login required)
+- gh-pm keeps running after you log out
+- gh-pm auto-restarts on failure (`Restart=on-failure`)
 
-| Directive | Purpose |
+To skip linger (only run during active sessions):
+
+```bash
+bash install.sh --no-linger
+```
+
+### Managing the Service
+
+```bash
+systemctl --user start   gh-pm.service   # Start
+systemctl --user stop    gh-pm.service   # Stop
+systemctl --user status  gh-pm.service   # Status
+systemctl --user restart gh-pm.service   # Restart
+journalctl --user -u gh-pm.service -f    # Follow logs
+```
+
+### Uninstall
+
+```bash
+bash modules/gh-pm/install.sh --uninstall
+```
+
+### Installer Options
+
+| Flag | Purpose |
 |---|---|
-| `User=%i` | Runs as the specified user |
-| `ExecStart=` | Path to the `gh-pm` binary — adjust for your install method |
-| `Environment=GH_PM_CONFIG=...` | Config file path |
-| `Environment=GH_PM_WORKSPACE=...` | Workspace directory |
-| `EnvironmentFile=` | Load API keys from a file (recommended) |
-| `Restart=on-failure` | Auto-restart on crashes; gh-pm's startup recovery handles re-dispatch |
-| `RestartSec=10` | Wait 10s before restarting |
+| `--exec-start PATH` | Override the gh-pm binary path |
+| `--env-file PATH` | Path to env file with API keys (default: `~/.gh-pm/env`) |
+| `--no-linger` | Skip `loginctl enable-linger` — service only runs during active sessions |
+| `--uninstall` | Stop, disable, and remove the service |
 
 ### Environment File
 
-Store secrets in `~/.gh-pm/env` (mode `600`) rather than in the unit file:
+Store secrets in `~/.gh-pm/env` (mode `600`):
 
 ```bash
 # ~/.gh-pm/env
@@ -347,13 +368,15 @@ ANTHROPIC_API_KEY=sk-ant-...
 GH_PM_LLM_PROFILE=default
 ```
 
-### Nix-installed Binary
+### Using a Nix-installed Binary
 
-If you installed via `nix profile install` or `nix build`, update `ExecStart` to point to the Nix store path:
-
-```ini
-ExecStart=/home/%i/.nix-profile/bin/gh-pm
+```bash
+bash install.sh --exec-start ~/.nix-profile/bin/gh-pm
 ```
+
+### Sample Unit File
+
+A reference unit file is also provided at [`gh-pm.service`](./gh-pm.service) for manual setup or system-level deployment. The install script generates a tailored version automatically.
 
 ## Running Tests
 

@@ -5,28 +5,22 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
 
 # --- Paths (adjust to your installation) ---
 # If installed via Nix:
-#   ExecStart=/home/USER/.nix-profile/bin/gh-pm
-# If cloned from source:
-ExecStart=/home/%i/smol-modules/modules/gh-pm/bin/gh-pm
+#   ExecStart=%h/.nix-profile/bin/gh-pm
+# If cloned from source (update path as needed):
+ExecStart=%h/smol-modules/modules/gh-pm/bin/gh-pm
 
 # Config and workspace (defaults shown; override as needed)
-Environment=GH_PM_CONFIG=/home/%i/.gh-pm/gh-pm.toml
-Environment=GH_PM_WORKSPACE=/home/%i/.gh-pm/workspace
+Environment=GH_PM_CONFIG=%h/.gh-pm/gh-pm.toml
+Environment=GH_PM_WORKSPACE=%h/.gh-pm/workspace
 
 # --- API keys ---
-# Option 1: Set directly (not recommended for shared systems)
-#Environment=OPENAI_API_KEY=sk-...
-#
-# Option 2: Load from an environment file (recommended)
-#EnvironmentFile=/home/%i/.gh-pm/env
-
-# --- gh CLI auth ---
-# gh stores credentials under XDG config; make sure it's accessible
-Environment=HOME=/home/%i
+# Load from an environment file (recommended).
+# Create ~/.gh-pm/env with your keys, e.g.:
+#   OPENAI_API_KEY=sk-...
+#EnvironmentFile=%h/.gh-pm/env
 
 # --- Restart policy ---
 Restart=on-failure
@@ -37,4 +31,4 @@ RestartSec=10
 #CPUQuota=50%
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
