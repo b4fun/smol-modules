@@ -15,7 +15,7 @@ gh_poll_issues() {
     --limit 100 2>/dev/null || echo '[]'
 }
 
-# gh_poll_prs REPO — JSON array of open PRs assigned to or review-requested from @me.
+# gh_poll_prs REPO — JSON array of open PRs assigned to, review-requested from, or authored by @me.
 gh_poll_prs() {
   local repo="$1"
   if [[ "${GH_PM_DRY_RUN:-0}" == "1" ]]; then
@@ -23,14 +23,17 @@ gh_poll_prs() {
     echo '[]'
     return 0
   fi
-  local assigned review_requested
+  local assigned review_requested authored
   assigned="$(gh pr list --repo "$repo" --assignee @me --state open \
     --json number,title,body,labels,url,createdAt,updatedAt \
     --limit 100 2>/dev/null || echo '[]')"
   review_requested="$(gh pr list --repo "$repo" --search "review-requested:@me" --state open \
     --json number,title,body,labels,url,createdAt,updatedAt \
     --limit 100 2>/dev/null || echo '[]')"
-  jq -s 'add | unique_by(.number)' <<< "${assigned}${review_requested}"
+  authored="$(gh pr list --repo "$repo" --author @me --state open \
+    --json number,title,body,labels,url,createdAt,updatedAt \
+    --limit 100 2>/dev/null || echo '[]')"
+  jq -s 'add | unique_by(.number)' <<< "${assigned}${review_requested}${authored}"
 }
 
 # gh_get_comments REPO TYPE NUMBER — JSON array of comments.
@@ -90,4 +93,14 @@ gh_get_labels() {
   [[ "$type" == "pr" ]] && cmd="pr"
   gh "$cmd" view "$number" --repo "$repo" --json labels \
     --jq '[.labels[].name] | join(",")' 2>/dev/null || echo ""
+}
+
+# gh_get_pending_reviews REPO PR_NUMBER — JSON array of CHANGES_REQUESTED reviews.
+gh_get_pending_reviews() {
+  local repo="$1" number="$2"
+  if [[ "${GH_PM_DRY_RUN:-0}" == "1" ]]; then
+    echo '[]'; return 0
+  fi
+  gh api "/repos/${repo}/pulls/${number}/reviews" 2>/dev/null \
+    | jq '[.[] | select(.state == "CHANGES_REQUESTED")]' 2>/dev/null || echo '[]'
 }
