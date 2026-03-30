@@ -10,7 +10,11 @@ recovery_run() {
 
   for task_dir in "$workspace"/*/; do
     [[ ! -d "$task_dir" ]] && continue
-    [[ ! -f "$task_dir/task.json" ]] && continue
+    if [[ ! -f "$task_dir/task.json" ]]; then
+      log_warn "recovery" "Removing incomplete task dir: $(basename "$task_dir") (no task.json)"
+      rm -rf "$task_dir"
+      continue
+    fi
 
     local task_id
     task_id="$(basename "$task_dir")"
