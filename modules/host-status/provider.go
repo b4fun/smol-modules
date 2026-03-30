@@ -114,15 +114,30 @@ func (p *Provider) Execute(ctx context.Context) (*ProviderResult, error) {
 	return result, nil
 }
 
+// ProviderExecutor is the interface for anything that can execute and return provider results
+type ProviderExecutor interface {
+	Execute(ctx context.Context) (*ProviderResult, error)
+}
+
 // ProviderRegistry manages multiple providers
 type ProviderRegistry struct {
-	providers []*Provider
+	providers []ProviderExecutor
 }
 
 // NewProviderRegistry creates a new provider registry
 func NewProviderRegistry(configs []ProviderConfig) *ProviderRegistry {
-	providers := make([]*Provider, 0, len(configs))
+	providers := make([]ProviderExecutor, 0, len(configs))
 	for _, config := range configs {
+		// Check if this is a builtin provider
+		if config.Command == "" && IsBuiltinProvider(config.Name) {
+			// Use builtin provider
+			builtinProvider := GetBuiltinProvider(config.Name, config)
+			if builtinProvider != nil {
+				providers = append(providers, NewBuiltinProviderWrapper(builtinProvider, config))
+				continue
+			}
+		}
+		// Use external command provider
 		providers = append(providers, NewProvider(config))
 	}
 	return &ProviderRegistry{providers: providers}
@@ -135,9 +150,9 @@ func (r *ProviderRegistry) ExecuteAll(ctx context.Context) []*ProviderResult {
 	for _, provider := range r.providers {
 		result, err := provider.Execute(ctx)
 		if err != nil {
-			// Create error result
+			// Create generic error result
 			result = &ProviderResult{
-				Name:      provider.config.Name,
+				Name:      "unknown",
 				Status:    StatusError,
 				Timestamp: time.Now(),
 				Error:     err.Error(),

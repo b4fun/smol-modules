@@ -41,11 +41,14 @@ push:
       auth: "Bearer your-token"
 
 providers:
+  # Built-in providers (no command needed)
   - name: "cpu"
-    command: "./examples/providers/cpu.sh"
     timeout: "10s"
   - name: "memory"
-    command: "./examples/providers/memory.sh"
+    timeout: "10s"
+  - name: "disk"
+    timeout: "10s"
+  - name: "uptime"
     timeout: "10s"
 ```
 
@@ -119,11 +122,94 @@ The same JSON format is POSTed to each destination URL with:
 - Configured authentication headers
 - Automatic retry on failure (3 attempts with exponential backoff)
 
-## Provider Interface
+## Providers
+
+host-status supports two types of providers:
+
+1. **Built-in Providers**: Implemented in Go, compiled into the binary (no external dependencies)
+2. **External Providers**: Custom scripts or programs that follow the provider contract
+
+### Built-in Providers
+
+The following providers are built into the host-status binary:
+
+#### CPU Provider
+Monitors CPU load averages and calculates load percentage.
+
+```yaml
+providers:
+  - name: "cpu"
+    timeout: "10s"
+```
+
+Metrics:
+- `load_1min`, `load_5min`, `load_15min`: Load averages
+- `cpu_count`: Number of CPU cores
+- `load_percentage`: Load as percentage of total CPU capacity
+
+Status:
+- `ok`: Load < 60%
+- `warn`: Load 60-80%
+- `error`: Load > 80%
+
+#### Memory Provider
+Monitors system memory usage.
+
+```yaml
+providers:
+  - name: "memory"
+    timeout: "10s"
+```
+
+Metrics:
+- `total_mb`, `used_mb`, `available_mb`: Memory in megabytes
+- `used_percentage`: Memory usage percentage
+
+Status:
+- `ok`: Usage < 80%
+- `warn`: Usage 80-90%
+- `error`: Usage > 90%
+
+#### Disk Provider
+Monitors filesystem disk usage.
+
+```yaml
+providers:
+  - name: "disk"
+    timeout: "10s"
+    args: ["/"]  # Optional: path to monitor (default: "/")
+```
+
+Metrics:
+- `path`: Monitored filesystem path
+- `total_gb`, `used_gb`, `available_gb`: Disk space in gigabytes
+- `used_percentage`: Disk usage percentage
+
+Status:
+- `ok`: Usage < 80%
+- `warn`: Usage 80-90%
+- `error`: Usage > 90%
+
+#### Uptime Provider
+Reports system uptime.
+
+```yaml
+providers:
+  - name: "uptime"
+    timeout: "10s"
+```
+
+Metrics:
+- `uptime_seconds`: Total uptime in seconds
+- `days`, `hours`, `minutes`: Uptime broken down
+
+Status: Always `ok`
+
+### External Provider Interface
 
 ### Provider Contract
 
-Providers are executable programs (scripts, binaries, etc.) that:
+External providers are executable programs (scripts, binaries, etc.) that:
 
 1. **Input**: Receive configuration via environment variables (optional)
 2. **Output**: Print JSON to stdout in the following format:
@@ -246,6 +332,15 @@ push:
 
 ### Provider Configuration
 
+Built-in providers:
+```yaml
+providers:
+  - name: string      # Provider name: "cpu", "memory", "disk", or "uptime"
+    timeout: string   # Execution timeout (default: "30s")
+    args: [string]    # Arguments (optional, disk provider accepts path)
+```
+
+External providers:
 ```yaml
 providers:
   - name: string      # Provider name (required, unique)

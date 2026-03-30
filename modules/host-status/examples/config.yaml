@@ -19,22 +19,26 @@ push:
     #   auth: "Bearer another-token"
 
 # Status providers
+# Built-in providers (cpu, memory, disk, uptime) don't need a command
 providers:
   - name: "cpu"
-    command: "./examples/providers/cpu.sh"
     timeout: "10s"
   
   - name: "memory"
-    command: "./examples/providers/memory.sh"
     timeout: "10s"
   
   - name: "disk"
-    command: "./examples/providers/disk.sh"
     timeout: "10s"
+    # Optional: specify a custom path for disk monitoring
+    # args: ["/data"]
   
   - name: "uptime"
-    command: "./examples/providers/uptime.sh"
     timeout: "10s"
+
+  # Example: Using external shell script providers (legacy/custom)
+  # - name: "cpu"
+  #   command: "./examples/providers/cpu.sh"
+  #   timeout: "10s"
 
   # Example of a custom provider with arguments and environment variables
   # - name: "custom"

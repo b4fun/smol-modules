@@ -2,7 +2,35 @@
 
 This guide explains how to create custom status providers for the host-status module.
 
-## Provider Interface
+## Built-in vs External Providers
+
+host-status supports two types of providers:
+
+### Built-in Providers
+
+The following providers are compiled into the host-status binary:
+- **cpu**: CPU load monitoring
+- **memory**: Memory usage monitoring  
+- **disk**: Disk usage monitoring
+- **uptime**: System uptime reporting
+
+Built-in providers require no external dependencies and are configured by name only:
+
+```yaml
+providers:
+  - name: "cpu"
+    timeout: "10s"
+  - name: "disk"
+    args: ["/data"]  # Optional path for disk provider
+```
+
+See the main README for detailed documentation of each built-in provider.
+
+### External Providers
+
+You can create custom providers as external programs (shell scripts, Python scripts, compiled binaries, etc.) that follow the provider interface described below.
+
+## External Provider Interface
 
 ### Requirements
 
