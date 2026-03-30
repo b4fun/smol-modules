@@ -8,9 +8,36 @@ A GitHub-native project manager agent. It watches for tasks (issues, PRs, commen
 GitHub (poll)          gh-pm              Workflows
   issues/PRs ───────▶  analyze  ───────▶  agent / script
   comments   ◀───────  report   ◀───────  result
+                         ↻
+                   monitor / retry
 ```
 
 gh-pm is a **coordinator**, not an executor. It decides what to do; workflows do the work. Humans decide when a task is complete.
+
+The core loop runs continuously: poll → analyze → dispatch → **monitor** → report. During the monitor phase, gh-pm periodically checks workflow status and retries timed-out workflows (see §4).
+
+## State folder overview
+
+gh-pm uses a single workspace directory (`$GH_PM_WORKSPACE`, default `~/.gh-pm/workspace`) as the source of truth for all in-flight work:
+
+```
+$GH_PM_WORKSPACE/
+  <task-id>/
+    task.json          # task definition + LLM analysis (written by gh-pm)
+    status.json        # progress updates (written by workflow)
+    result.json        # final output (written by workflow)
+    dispatch.json      # dispatch metadata: PID, timestamps, attempt count (written by gh-pm)
+```
+
+The config file and profiles live alongside:
+
+```
+~/.gh-pm/
+  gh-pm.toml           # config file with LLM profiles, poll interval, timeouts
+  workspace/           # task directories (see above)
+```
+
+See §4 for the full protocol and file schemas.
 
 ## Key decisions
 
@@ -34,52 +61,59 @@ The LLM call for task analysis is behind a pluggable backend. Each provider is m
 
 #### Provider profiles
 
-Profiles are defined in a config file (`ghpm.toml` or `ghpm.json`):
+Profiles are defined in a config file (`gh-pm.toml` or `gh-pm.json`):
 
 ```toml
 [profiles.default]
-backend = "raw"           # raw OpenAI-compatible HTTP
 model   = "gpt-4o"
 api_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"   # read key from this env var
 
 [profiles.claude]
-backend = "raw"
 model   = "claude-sonnet-4-20250514"
 api_url = "https://api.anthropic.com/v1"
 api_key_env = "ANTHROPIC_API_KEY"
 
 [profiles.local]
-backend = "raw"
 model   = "llama3"
 api_url = "http://localhost:11434/v1"
+
+[profiles.openai-agents]
+backend = "openai-agents"     # only set backend when using an SDK adapter
+model   = "gpt-4o"
+api_key_env = "OPENAI_API_KEY"
 ```
+
+When `backend` is omitted, gh-pm uses a plain OpenAI-compatible HTTP call (the most common case). The `backend` field is only needed for SDK-based adapters that require a different calling convention.
 
 The active profile is selected by (in priority order):
 
-1. **Task-level override** — a GitHub label on the issue/PR (e.g. `ghpm:profile=claude`) selects the profile for that task.
-2. **Environment variable** — `GHPM_LLM_PROFILE=claude`.
+1. **Task-level override** — a GitHub label on the issue/PR (e.g. `gh-pm:profile=claude`) selects the profile for that task.
+2. **Environment variable** — `GH_PM_LLM_PROFILE=claude`.
 3. **Config default** — the profile named `default`.
 
-This lets users route different tasks to different models. For example, a label `ghpm:profile=local` on a low-priority issue uses a local model, while critical tasks use a frontier model.
+This lets users route different tasks to different models. For example, a label `gh-pm:profile=local` on a low-priority issue uses a local model, while critical tasks use a frontier model.
 
 #### Supported backends
 
-- **`raw`** — any OpenAI-compatible chat endpoint (covers OpenRouter, self-hosted, etc.). Default.
-- **Provider SDKs** — OpenAI Agents SDK, Anthropic SDK, Copilot SDK, etc. These shell out to a small wrapper script/binary in the adapter's language.
+- **(default, no `backend` field)** — plain OpenAI-compatible HTTP chat endpoint. Works with OpenRouter, Anthropic, self-hosted, or any provider that speaks the OpenAI chat format. This is the common path and needs no extra tooling.
+- **`openai-agents`** — OpenAI Agents SDK. Shells out to a wrapper.
+- **`anthropic`** — Anthropic SDK. Shells out to a wrapper.
+- **`copilot`** — Copilot SDK. Shells out to a wrapper.
 
-The `raw` backend is the default since it works everywhere and keeps the bash implementation simple.
+SDK-based backends shell out to a small wrapper script/binary in the adapter's language. The default (no backend) keeps things simple and works everywhere in bash.
 
 ### 4. Directory-based workflow protocol
 
 gh-pm delegates work by writing a **task file** into a workspace directory. A workflow picks it up, does the work, and writes a **result file**. gh-pm watches for results.
 
 ```
-$GHPM_WORKSPACE/
+$GH_PM_WORKSPACE/
   <task-id>/
     task.json        # written by gh-pm
     status.json      # written by workflow (updated as work progresses)
     result.json      # written by workflow (final output)
+    dispatch.json    # written by gh-pm (dispatch metadata)
 ```
 
 **task.json** (written by gh-pm):
@@ -115,13 +149,44 @@ $GHPM_WORKSPACE/
 
 gh-pm detects completion by the presence of `result.json`.
 
+**dispatch.json** (written by gh-pm when dispatching):
+```json
+{
+  "pid": 12345,
+  "dispatched_at": "ISO-8601",
+  "attempt": 1,
+  "timeout_seconds": 3600
+}
+```
+
+#### Monitoring and timeout retry
+
+While workflows are in-flight, gh-pm periodically (on each poll cycle) checks their status:
+
+1. Read `status.json` — if updated, relay progress to GitHub.
+2. Check `result.json` — if present, report completion.
+3. Check timeout — if `now - dispatched_at > timeout_seconds` and no `result.json`, the workflow is considered timed out:
+   - For process-spawn adapter: kill the process if still running.
+   - Increment `attempt` in `dispatch.json` and re-dispatch (up to a configurable max retries, default 3).
+   - Post a timeout notice on GitHub.
+4. If max retries exceeded, mark as failed and report.
+
+Timeout and retry settings are configurable per-profile or globally in `gh-pm.toml`:
+
+```toml
+[settings]
+poll_interval = 60           # seconds
+workflow_timeout = 3600      # seconds, default per-task timeout
+max_retries = 3
+```
+
 #### Restart recovery
 
-On startup, gh-pm scans `$GHPM_WORKSPACE/` for existing task directories and reconciles their state:
+On startup, gh-pm scans `$GH_PM_WORKSPACE/` for existing task directories and reconciles their state:
 
 - **Has `result.json`** → treat as completed; report to GitHub if not already reported.
-- **Has `status.json` but no `result.json`** → workflow was in-flight; resume monitoring. If the workflow process is no longer running (for process-spawn adapter), mark as interrupted and report.
-- **Has `task.json` only** → dispatch was written but workflow never started; re-dispatch.
+- **Has `status.json` but no `result.json`** → workflow was in-flight; resume monitoring. Check `dispatch.json` for PID — if the process is no longer running (for process-spawn adapter), treat as timed out and retry per the retry policy.
+- **Has `task.json` only (no `dispatch.json`)** → dispatch was written but workflow never started; re-dispatch.
 
 This makes gh-pm resilient to crashes and restarts. The workspace directory is the source of truth for in-flight work, and GitHub comments are the source of truth for what's been reported.
 
