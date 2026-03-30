@@ -49,6 +49,9 @@ config_load
 log_init
 mkdir -p "$GH_PM_WORKSPACE"
 
+# Resolve authenticated GitHub user for filtering authored PRs
+GH_PM_USER="$(gh api user --jq '.login' 2>/dev/null || echo '')"
+
 log_info "main" "gh-pm starting (config=$GH_PM_CONFIG workspace=$GH_PM_WORKSPACE dry_run=$GH_PM_DRY_RUN)"
 
 # --- Startup recovery ---
@@ -391,9 +394,15 @@ while true; do
     pr_count="$(echo "$prs_json" | jq 'length')"
     for (( i=0; i<pr_count; i++ )); do
       item="$(echo "$prs_json" | jq ".[$i]")"
-      process_item "$repo" "pr" "$item"
-      # Check for review feedback on authored PRs
-      process_pr_reviews "$repo" "$item"
+      local pr_author
+      pr_author="$(echo "$item" | jq -r '.author.login // ""')"
+      if [[ "$pr_author" == "$GH_PM_USER" ]]; then
+        # Authored PR — only check for review feedback, don't re-analyze
+        process_pr_reviews "$repo" "$item"
+      else
+        # Assigned/review-requested PR — process as new task
+        process_item "$repo" "pr" "$item"
+      fi
     done
   done
 

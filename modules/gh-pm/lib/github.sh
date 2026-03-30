@@ -25,13 +25,13 @@ gh_poll_prs() {
   fi
   local assigned review_requested authored
   assigned="$(gh pr list --repo "$repo" --assignee @me --state open \
-    --json number,title,body,labels,url,createdAt,updatedAt \
+    --json number,title,body,labels,url,author,createdAt,updatedAt \
     --limit 100 2>/dev/null || echo '[]')"
   review_requested="$(gh pr list --repo "$repo" --search "review-requested:@me" --state open \
-    --json number,title,body,labels,url,createdAt,updatedAt \
+    --json number,title,body,labels,url,author,createdAt,updatedAt \
     --limit 100 2>/dev/null || echo '[]')"
   authored="$(gh pr list --repo "$repo" --author @me --state open \
-    --json number,title,body,labels,url,createdAt,updatedAt \
+    --json number,title,body,labels,url,author,createdAt,updatedAt \
     --limit 100 2>/dev/null || echo '[]')"
   jq -s 'add | unique_by(.number)' <<< "${assigned}${review_requested}${authored}"
 }
