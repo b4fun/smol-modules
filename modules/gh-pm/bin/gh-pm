@@ -365,6 +365,134 @@ Produce a plan to address the review feedback."
   done
 }
 
+# process_pr_ci_failures REPO ITEM_JSON
+# Check for failed CI checks on an authored PR and dispatch a fix task.
+process_pr_ci_failures() {
+  local repo="$1" item_json="$2"
+
+  if [[ "${GH_PM_DRY_RUN:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  local number title body labels_csv
+  number="$(echo "$item_json" | jq -r '.number')"
+  title="$(echo "$item_json" | jq -r '.title // ""')"
+  body="$(echo "$item_json" | jq -r '.body // ""')"
+  labels_csv="$(echo "$item_json" | jq -r '[.labels[]?.name // empty] | join(",")')"
+
+  local owner repo_name
+  owner="${repo%%/*}"
+  repo_name="${repo#*/}"
+
+  # Get the head commit SHA
+  local head_sha
+  head_sha="$(gh pr view "$number" --repo "$repo" --json headRefOid -q .headRefOid 2>/dev/null)"
+  [[ -z "$head_sha" ]] && return 0
+
+  # Get failed check runs
+  local failed_checks
+  failed_checks="$(gh api "repos/${repo}/commits/${head_sha}/check-runs" 2>/dev/null \
+    | jq '[.check_runs[] | select(.status == "completed" and .conclusion == "failure")]' 2>/dev/null || echo '[]')"
+  local fail_count
+  fail_count="$(echo "$failed_checks" | jq 'length')"
+  [[ "$fail_count" -eq 0 ]] && return 0
+
+  # Use head SHA in task ID so we only process failures once per push
+  local short_sha="${head_sha:0:7}"
+  local task_id="${owner}-${repo_name}-pr-${number}-ci-${short_sha}"
+  local task_dir="${GH_PM_WORKSPACE}/${task_id}"
+
+  # Skip if already tracked
+  if [[ -d "$task_dir" ]]; then
+    log_debug "poll" "Already tracked: $task_id"
+    return 0
+  fi
+  if [[ -n "$(gh_find_tracking_comment "$repo" "$number" "$task_id")" ]]; then
+    log_debug "poll" "Tracking comment exists: $task_id"
+    return 0
+  fi
+
+  # Build failure summary
+  local failure_summary=""
+  for (( fi=0; fi<fail_count; fi++ )); do
+    local check_name check_url
+    check_name="$(echo "$failed_checks" | jq -r ".[$fi].name")"
+    check_url="$(echo "$failed_checks" | jq -r ".[$fi].html_url // \"\"")"
+    failure_summary+="- **${check_name}**"
+    [[ -n "$check_url" ]] && failure_summary+=" ([logs](${check_url}))"
+    failure_summary+=$'\n'
+  done
+
+  log_info "poll" "CI failure on $repo#$number ($fail_count check(s) failed, sha=$short_sha)"
+
+  # Resolve LLM profile
+  local profile
+  profile="$(config_resolve_profile "$labels_csv")"
+  log_info "analyze" "Using profile=$profile for $task_id"
+
+  mkdir -p "$task_dir"
+  log_task_init "$task_id"
+
+  report_analyzing "$repo" "$number" "$task_id" "$profile" || true
+
+  # LLM analysis
+  local system_prompt="You are a project manager agent. A pull request has failing CI checks. Analyze the failures and produce clear instructions for an automated workflow to fix them. Respond with your analysis directly — do NOT use any tools, do NOT browse files, do NOT run commands."
+  local user_prompt="Repository: ${repo}
+PR #${number}: ${title}
+Head commit: ${head_sha}
+
+PR Description:
+${body}
+
+Failed CI checks:
+${failure_summary}
+Produce a plan to investigate and fix the CI failures. The workflow agent will have access to the repository and can run commands to diagnose and fix the issues."
+
+  local analysis
+  if ! analysis="$(llm_call "$profile" "$system_prompt" "$user_prompt")"; then
+    log_error "analyze" "LLM call failed for $task_id"
+    rm -rf "$task_dir"
+    log_task_reset
+    return 0
+  fi
+
+  # Write task.json
+  local workflow_policy
+  workflow_policy="$(config_get_setting workflow_policy)"
+
+  jq -n \
+    --arg id "$task_id" \
+    --arg source_type "pr-ci" \
+    --arg source_repo "$repo" \
+    --argjson source_number "$number" \
+    --arg source_url "$(echo "$item_json" | jq -r '.url // ""')" \
+    --arg title "$title" \
+    --arg body "$body" \
+    --arg ci_failures "$failure_summary" \
+    --arg analysis "$analysis" \
+    --arg policy "$workflow_policy" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{
+      id: $id,
+      source: {type: $source_type, repo: $source_repo, number: $source_number, url: $source_url},
+      title: $title,
+      body: $body,
+      ci_failures: $ci_failures,
+      analysis: $analysis,
+      policy: $policy,
+      created_at: $created_at
+    }' > "$task_dir/task.json"
+
+  if dispatch_task "$task_dir"; then
+    report_dispatch "$repo" "$number" "$task_id" || true
+  else
+    log_error "dispatch" "Failed to dispatch $task_id"
+    rm -rf "$task_dir"
+  fi
+
+  log_task_reset
+}
+
 # --- Main loop ---
 POLL_INTERVAL="$(config_get_setting poll_interval)"
 POLL_INTERVAL="${POLL_INTERVAL:-60}"
@@ -397,8 +525,9 @@ while true; do
       local pr_author
       pr_author="$(echo "$item" | jq -r '.author.login // ""')"
       if [[ "$pr_author" == "$GH_PM_USER" ]]; then
-        # Authored PR — only check for review feedback, don't re-analyze
+        # Authored PR — check for review feedback and CI failures
         process_pr_reviews "$repo" "$item"
+        process_pr_ci_failures "$repo" "$item"
       else
         # Assigned/review-requested PR — process as new task
         process_item "$repo" "pr" "$item"
