@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# gh-pm — GitHub Project Manager agent
+# Polls GitHub for assigned tasks, analyzes them with an LLM,
+# dispatches workflows, and reports status.
+
+show_usage() {
+  cat <<'EOF'
+Usage: gh-pm [OPTIONS]
+
+Options:
+  --config PATH      Config file (default: ~/.gh-pm/gh-pm.toml, or $GH_PM_CONFIG)
+  --workspace PATH   Workspace dir (default: ~/.gh-pm/workspace, or $GH_PM_WORKSPACE)
+  --dry-run          No side effects — print what would happen
+  --once             Run one poll cycle then exit
+  --help             Show this help
+EOF
+}
+
+# --- CLI parsing ---
+ONCE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config)    shift; export GH_PM_CONFIG="$1"; shift ;;
+    --workspace) shift; export GH_PM_WORKSPACE="$1"; shift ;;
+    --dry-run)   export GH_PM_DRY_RUN=1; shift ;;
+    --once)      ONCE=1; shift ;;
+    --help|-h)   show_usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; show_usage >&2; exit 1 ;;
+  esac
+done
+
+# --- Resolve paths ---
+GH_PM_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && cd .. && pwd)"
+export GH_PM_DIR
+export GH_PM_CONFIG="${GH_PM_CONFIG:-$HOME/.gh-pm/gh-pm.toml}"
+export GH_PM_WORKSPACE="${GH_PM_WORKSPACE:-$HOME/.gh-pm/workspace}"
+export GH_PM_DRY_RUN="${GH_PM_DRY_RUN:-0}"
+
+# --- Source libraries ---
+for lib in "$GH_PM_DIR"/lib/*.sh; do
+  # shellcheck source=/dev/null
+  source "$lib"
+done
+
+# --- Initialize ---
+config_load
+log_init
+mkdir -p "$GH_PM_WORKSPACE"
+
+log_info "main" "gh-pm starting (config=$GH_PM_CONFIG workspace=$GH_PM_WORKSPACE dry_run=$GH_PM_DRY_RUN)"
+
+# --- Startup recovery ---
+log_info "main" "Running startup recovery"
+recovery_run
+
+# --- Helpers ---
+
+# process_item REPO TYPE ITEM_JSON
+# TYPE: "issue" or "pr"
+# ITEM_JSON: single object from gh poll output
+process_item() {
+  local repo="$1" type="$2" item_json="$3"
+
+  local number title body labels_csv
+  number="$(echo "$item_json" | jq -r '.number')"
+  title="$(echo "$item_json" | jq -r '.title // ""')"
+  body="$(echo "$item_json" | jq -r '.body // ""')"
+  labels_csv="$(echo "$item_json" | jq -r '[.labels[]?.name // empty] | join(",")')"
+
+  # Derive task ID
+  local owner repo_name task_id task_dir
+  owner="${repo%%/*}"
+  repo_name="${repo#*/}"
+  task_id="${owner}-${repo_name}-${type}-${number}"
+  task_dir="${GH_PM_WORKSPACE}/${task_id}"
+
+  # Skip if already tracked locally
+  if [[ -d "$task_dir" ]]; then
+    log_debug "poll" "Already tracked: $task_id"
+    return 0
+  fi
+
+  # Skip if tracking comment already exists on GitHub
+  local existing_comment
+  existing_comment="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
+  if [[ -n "$existing_comment" ]]; then
+    log_debug "poll" "Tracking comment exists: $task_id"
+    return 0
+  fi
+
+  log_info "poll" "New $type: $repo#$number - $title"
+
+  # Resolve LLM profile
+  local profile
+  profile="$(config_resolve_profile "$labels_csv")"
+  log_info "analyze" "Using profile=$profile for $task_id"
+
+  # Create task dir and init logging
+  mkdir -p "$task_dir"
+  log_task_init "$task_id"
+
+  # Gather context: comments
+  local comments_json
+  comments_json="$(gh_get_comments "$repo" "$type" "$number")"
+  local comments_text
+  comments_text="$(echo "$comments_json" | jq -r '.[]? | "[\(.author.login // "unknown")] \(.body // "")"' 2>/dev/null || echo '')"
+
+  # LLM analysis
+  local system_prompt user_prompt
+  if [[ "$type" == "issue" ]]; then
+    system_prompt="You are a project manager agent. Analyze the following GitHub issue and break it down into actionable sub-tasks. Provide clear instructions for an automated workflow to execute."
+  else
+    system_prompt="You are a project manager agent. Analyze the following GitHub pull request and break it down into actionable review tasks. Provide clear instructions for an automated workflow to execute."
+  fi
+
+  user_prompt="Repository: ${repo}
+${type^} #${number}: ${title}
+
+Description:
+${body}"
+
+  if [[ -n "$comments_text" ]]; then
+    user_prompt+="
+
+Comments:
+${comments_text}"
+  fi
+
+  local analysis
+  if ! analysis="$(llm_call "$profile" "$system_prompt" "$user_prompt")"; then
+    log_error "analyze" "LLM call failed for $task_id"
+    rm -rf "$task_dir"
+    log_task_reset
+    return 0
+  fi
+
+  # Write task.json (matching design spec schema)
+  jq -n \
+    --arg id "$task_id" \
+    --arg source_type "$type" \
+    --arg source_repo "$repo" \
+    --argjson source_number "$number" \
+    --arg source_url "$(echo "$item_json" | jq -r '.url // ""')" \
+    --arg title "$title" \
+    --arg body "$body" \
+    --arg analysis "$analysis" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{
+      id: $id,
+      source: {type: $source_type, repo: $source_repo, number: $source_number, url: $source_url},
+      title: $title,
+      body: $body,
+      analysis: $analysis,
+      created_at: $created_at
+    }' > "$task_dir/task.json"
+
+  # Dispatch workflow
+  if dispatch_task "$task_dir"; then
+    report_dispatch "$repo" "$number" "$task_id" || true
+  else
+    log_error "dispatch" "Failed to dispatch $task_id"
+    rm -rf "$task_dir"
+  fi
+
+  log_task_reset
+}
+
+# monitor_inflight — check all in-flight tasks.
+monitor_inflight() {
+  for task_dir in "$GH_PM_WORKSPACE"/*/; do
+    [[ ! -d "$task_dir" ]] && continue
+    [[ ! -f "$task_dir/task.json" ]] && continue
+    [[ ! -f "$task_dir/dispatch.json" ]] && continue
+    [[ -f "$task_dir/result.json" ]] && continue  # already done
+
+    local task_id repo number
+    task_id="$(basename "$task_dir")"
+    repo="$(jq -r '.source.repo // empty' "$task_dir/task.json")"
+    number="$(jq -r '.source.number // empty' "$task_dir/task.json")"
+    [[ -z "$repo" || -z "$number" ]] && continue
+
+    log_task_init "$task_id"
+
+    local status
+    status="$(dispatch_check_status "$task_dir")"
+
+    case "$status" in
+      done)
+        log_info "monitor" "Task $task_id completed"
+        report_completion "$repo" "$number" "$task_id" "$task_dir/result.json" || true
+        ;;
+      failed)
+        log_warn "monitor" "Task $task_id failed"
+        local err=""
+        [[ -f "$task_dir/result.json" ]] && err="$(jq -r '.error // "Unknown error"' "$task_dir/result.json")"
+        report_failure "$repo" "$number" "$task_id" "${err:-Workflow process exited without result}" || true
+        ;;
+      timeout)
+        log_warn "monitor" "Task $task_id timed out"
+        local attempt max_retries
+        attempt="$(jq -r '.attempt // 1' "$task_dir/dispatch.json")"
+        max_retries="$(config_get_setting max_retries)"
+        max_retries="${max_retries:-3}"
+        report_timeout "$repo" "$number" "$task_id" "$attempt" "$max_retries" || true
+        dispatch_handle_timeout "$task_dir" || true
+        ;;
+      running)
+        # Check for status.json updates
+        if [[ -f "$task_dir/status.json" ]]; then
+          local msg
+          msg="$(jq -r '.message // ""' "$task_dir/status.json" 2>/dev/null)"
+          if [[ -n "$msg" ]]; then
+            log_debug "monitor" "Task $task_id status: $msg"
+            report_status "$repo" "$number" "$task_id" "$msg" || true
+          fi
+        fi
+        ;;
+    esac
+
+    log_task_reset
+  done
+}
+
+# --- Main loop ---
+POLL_INTERVAL="$(config_get_setting poll_interval)"
+POLL_INTERVAL="${POLL_INTERVAL:-60}"
+
+mapfile -t REPOS < <(config_get_repos)
+if [[ ${#REPOS[@]} -eq 0 ]]; then
+  log_warn "main" "No repos configured in [settings] repos"
+fi
+
+while true; do
+  log_debug "main" "Poll cycle starting"
+
+  for repo in "${REPOS[@]}"; do
+    [[ -z "$repo" ]] && continue
+    log_debug "poll" "Polling $repo"
+
+    # Issues
+    issues_json="$(gh_poll_issues "$repo")"
+    issue_count="$(echo "$issues_json" | jq 'length')"
+    for (( i=0; i<issue_count; i++ )); do
+      item="$(echo "$issues_json" | jq ".[$i]")"
+      process_item "$repo" "issue" "$item"
+    done
+
+    # PRs
+    prs_json="$(gh_poll_prs "$repo")"
+    pr_count="$(echo "$prs_json" | jq 'length')"
+    for (( i=0; i<pr_count; i++ )); do
+      item="$(echo "$prs_json" | jq ".[$i]")"
+      process_item "$repo" "pr" "$item"
+    done
+  done
+
+  # Monitor in-flight tasks
+  monitor_inflight
+
+  if [[ "$ONCE" -eq 1 ]]; then
+    log_info "main" "--once mode, exiting after single cycle"
+    break
+  fi
+
+  log_debug "main" "Sleeping ${POLL_INTERVAL}s"
+  sleep "$POLL_INTERVAL"
+done
+
+log_info "main" "gh-pm stopped"
