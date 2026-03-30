@@ -1,0 +1,69 @@
+# host-status configuration file
+# Copy this to ~/.host-status/host-status.toml and customize
+
+[settings]
+# Hostname to identify this host (defaults to system hostname)
+hostname = ""
+
+# Push mode: periodically POST status to a remote endpoint
+push_enabled = false
+push_url = "https://status-collector.example.com/api/hosts"
+push_interval = 300  # seconds (5 minutes)
+
+# Pull mode: HTTP server for on-demand status queries
+pull_enabled = true
+pull_port = 8080
+
+# Provider execution timeout (seconds)
+collection_timeout = 10
+
+# Logging
+log_level = "INFO"  # DEBUG, INFO, WARN, ERROR
+log_file = ""  # empty means stderr only
+
+# Provider definitions
+# Each provider is executed to collect a specific metric
+
+# Built-in system metrics provider (CPU, memory, disk, uptime)
+[[providers]]
+name = "system-cpu"
+command = "./bin/host-status-provider-system"
+args = ["cpu"]
+enabled = true
+
+[[providers]]
+name = "system-memory"
+command = "./bin/host-status-provider-system"
+args = ["memory"]
+enabled = true
+
+[[providers]]
+name = "system-disk-root"
+command = "./bin/host-status-provider-system"
+args = ["disk", "/"]
+enabled = true
+
+[[providers]]
+name = "system-uptime"
+command = "./bin/host-status-provider-system"
+args = ["uptime"]
+enabled = true
+
+# Example custom provider
+# [[providers]]
+# name = "custom-check"
+# command = "/path/to/your/check-script.sh"
+# args = ["arg1", "arg2"]
+# enabled = true
+
+# Provider output format (JSON):
+# {
+#   "name": "provider-name",
+#   "status": "ok|warning|critical|unknown",
+#   "value": 42.5,
+#   "unit": "percent",
+#   "message": "Human-readable status",
+#   "metadata": {
+#     "additional": "fields"
+#   }
+# }

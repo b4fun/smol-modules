@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# host-status — Host monitoring daemon
+# Collects host metrics via providers and supports pull (HTTP) and push (periodic POST) modes.
+
+# Resolve script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MODULE_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Source libraries
+source "$MODULE_DIR/lib/log.sh"
+source "$MODULE_DIR/lib/config.sh"
+source "$MODULE_DIR/lib/collect.sh"
+source "$MODULE_DIR/lib/server.sh"
+source "$MODULE_DIR/lib/push.sh"
+
+# Global flags
+declare -g HOST_STATUS_DRY_RUN=0
+declare -g HOST_STATUS_ONCE=0
+
+usage() {
+  cat << 'EOF'
+host-status - Host monitoring daemon
+
+USAGE:
+  host-status [OPTIONS]
+
+OPTIONS:
+  --config PATH      Path to config file (default: ~/.host-status/host-status.toml)
+  --once             Collect and print status once, then exit
+  --dry-run          Dry-run mode (no HTTP operations)
+  --help             Show this help message
+
+MODES:
+  - Pull mode: HTTP server responds to GET /status and GET /health
+  - Push mode: Periodically POST status to configured endpoint
+  - Both modes can be enabled simultaneously
+
+EXAMPLES:
+  # Run daemon with default config
+  host-status
+
+  # Collect status once and print to stdout
+  host-status --once
+
+  # Test configuration without making HTTP requests
+  host-status --dry-run --once
+
+  # Use custom config file
+  host-status --config /etc/host-status/config.toml
+
+EOF
+}
+
+main() {
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --config)
+        export HOST_STATUS_CONFIG="$2"
+        shift 2
+        ;;
+      --once)
+        HOST_STATUS_ONCE=1
+        shift
+        ;;
+      --dry-run)
+        HOST_STATUS_DRY_RUN=1
+        shift
+        ;;
+      --help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "host-status: error: unknown option: $1" >&2
+        echo "Run 'host-status --help' for usage." >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # Load configuration
+  if ! config_load; then
+    echo "host-status: error: failed to load configuration" >&2
+    exit 1
+  fi
+
+  # Initialize logging
+  log_init
+
+  log_info "main" "host-status starting"
+
+  # Once mode: collect and print, then exit
+  if [[ $HOST_STATUS_ONCE -eq 1 ]]; then
+    log_info "main" "Running in once mode"
+    if ! collect_all_providers; then
+      log_error "main" "Failed to collect status"
+      exit 1
+    fi
+    exit 0
+  fi
+
+  # Check which modes are enabled
+  local push_enabled pull_enabled
+  push_enabled="$(config_get_setting push_enabled)"
+  pull_enabled="$(config_get_setting pull_enabled)"
+
+  if [[ "$push_enabled" != "true" && "$pull_enabled" != "true" ]]; then
+    log_error "main" "Neither push nor pull mode is enabled in configuration"
+    exit 1
+  fi
+
+  # Set up signal handlers
+  trap 'log_info "main" "Received SIGTERM, shutting down"; exit 0' TERM
+  trap 'log_info "main" "Received SIGINT, shutting down"; exit 0' INT
+
+  # Start background jobs for enabled modes
+  if [[ "$push_enabled" == "true" ]]; then
+    log_info "main" "Starting push mode"
+    start_push_loop &
+    local push_pid=$!
+  fi
+
+  if [[ "$pull_enabled" == "true" ]]; then
+    log_info "main" "Starting pull mode"
+    start_http_server &
+    local server_pid=$!
+  fi
+
+  # Wait for background jobs
+  log_info "main" "Daemon running (push=${push_enabled}, pull=${pull_enabled})"
+  wait
+}
+
+main "$@"

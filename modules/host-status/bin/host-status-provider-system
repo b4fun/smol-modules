@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# host-status-provider-system — Built-in system metrics provider
+# Collects CPU, memory, disk, and uptime metrics in a single provider
+
+get_cpu_usage() {
+  # Read CPU stats from /proc/stat
+  if [[ -f /proc/stat ]]; then
+    local cpu_line
+    cpu_line="$(grep '^cpu ' /proc/stat)"
+    # Just return load averages for simplicity
+    if [[ -f /proc/loadavg ]]; then
+      read -r load1 load5 load15 _ < /proc/loadavg
+      echo "$load1" "$load5" "$load15"
+    else
+      echo "0.0 0.0 0.0"
+    fi
+  else
+    echo "0.0 0.0 0.0"
+  fi
+}
+
+get_memory_usage() {
+  # Read memory stats from /proc/meminfo
+  if [[ -f /proc/meminfo ]]; then
+    local mem_total mem_available
+    mem_total="$(grep '^MemTotal:' /proc/meminfo | awk '{print $2}')"
+    mem_available="$(grep '^MemAvailable:' /proc/meminfo | awk '{print $2}')"
+    
+    if [[ -n "$mem_total" && -n "$mem_available" ]]; then
+      local mem_used=$((mem_total - mem_available))
+      local mem_percent=$((mem_used * 100 / mem_total))
+      echo "$mem_percent" "$mem_used" "$mem_total"
+    else
+      echo "0 0 0"
+    fi
+  else
+    echo "0 0 0"
+  fi
+}
+
+get_disk_usage() {
+  local path="${1:-/}"
+  
+  if df -h "$path" &>/dev/null; then
+    local usage
+    usage="$(df -h "$path" | tail -1 | awk '{print $5}' | tr -d '%')"
+    local used available
+    used="$(df -h "$path" | tail -1 | awk '{print $3}')"
+    available="$(df -h "$path" | tail -1 | awk '{print $4}')"
+    echo "$usage" "$used" "$available"
+  else
+    echo "0 0B 0B"
+  fi
+}
+
+get_uptime() {
+  if [[ -f /proc/uptime ]]; then
+    read -r uptime_sec _ < /proc/uptime
+    echo "$uptime_sec"
+  else
+    echo "0"
+  fi
+}
+
+# Main execution
+main() {
+  local check_type="${1:-all}"
+  
+  case "$check_type" in
+    cpu)
+      read -r load1 load5 load15 <<< "$(get_cpu_usage)"
+      local status="ok"
+      local load1_int="${load1%.*}"
+      [[ $load1_int -gt 5 ]] && status="warning"
+      [[ $load1_int -gt 10 ]] && status="critical"
+      
+      jq -n \
+        --arg name "cpu" \
+        --arg status "$status" \
+        --arg load1 "$load1" \
+        --arg load5 "$load5" \
+        --arg load15 "$load15" \
+        --arg message "Load average: $load1 (1m) $load5 (5m) $load15 (15m)" \
+        '{
+          name: $name,
+          status: $status,
+          value: ($load1 | tonumber),
+          unit: "load",
+          message: $message,
+          metadata: {
+            load_1m: ($load1 | tonumber),
+            load_5m: ($load5 | tonumber),
+            load_15m: ($load15 | tonumber)
+          }
+        }'
+      ;;
+    
+    memory)
+      read -r mem_percent mem_used mem_total <<< "$(get_memory_usage)"
+      local status="ok"
+      [[ $mem_percent -gt 80 ]] && status="warning"
+      [[ $mem_percent -gt 95 ]] && status="critical"
+      
+      jq -n \
+        --arg name "memory" \
+        --arg status "$status" \
+        --argjson value "$mem_percent" \
+        --arg message "Memory usage: ${mem_percent}%" \
+        --argjson used "$mem_used" \
+        --argjson total "$mem_total" \
+        '{
+          name: $name,
+          status: $status,
+          value: $value,
+          unit: "percent",
+          message: $message,
+          metadata: {
+            used_kb: $used,
+            total_kb: $total
+          }
+        }'
+      ;;
+    
+    disk)
+      local path="${2:-/}"
+      read -r usage used available <<< "$(get_disk_usage "$path")"
+      local status="ok"
+      [[ $usage -gt 80 ]] && status="warning"
+      [[ $usage -gt 95 ]] && status="critical"
+      
+      jq -n \
+        --arg name "disk" \
+        --arg status "$status" \
+        --argjson value "$usage" \
+        --arg path "$path" \
+        --arg message "Disk usage on $path: ${usage}%" \
+        --arg used "$used" \
+        --arg available "$available" \
+        '{
+          name: $name,
+          status: $status,
+          value: $value,
+          unit: "percent",
+          message: $message,
+          metadata: {
+            path: $path,
+            used: $used,
+            available: $available
+          }
+        }'
+      ;;
+    
+    uptime)
+      local uptime_sec
+      uptime_sec="$(get_uptime)"
+      local uptime_days=$((${uptime_sec%.*} / 86400))
+      
+      jq -n \
+        --arg name "uptime" \
+        --arg status "ok" \
+        --arg value "$uptime_sec" \
+        --argjson days "$uptime_days" \
+        --arg message "System uptime: ${uptime_days} days" \
+        '{
+          name: $name,
+          status: $status,
+          value: ($value | tonumber),
+          unit: "seconds",
+          message: $message,
+          metadata: {
+            uptime_days: $days
+          }
+        }'
+      ;;
+    
+    all)
+      # Collect all metrics and return as array
+      local cpu_json mem_json disk_json uptime_json
+      cpu_json="$("$0" cpu)"
+      mem_json="$("$0" memory)"
+      disk_json="$("$0" disk /)"
+      uptime_json="$("$0" uptime)"
+      
+      jq -n \
+        --argjson cpu "$cpu_json" \
+        --argjson mem "$mem_json" \
+        --argjson disk "$disk_json" \
+        --argjson uptime "$uptime_json" \
+        '[$cpu, $mem, $disk, $uptime]'
+      ;;
+    
+    *)
+      echo "Usage: $0 {cpu|memory|disk|uptime|all} [path]" >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

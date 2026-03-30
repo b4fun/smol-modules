@@ -1,0 +1,16 @@
+[Unit]
+Description=Host Status Monitoring Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=%u
+WorkingDirectory=%h/.host-status
+ExecStart=%h/.host-status/bin/host-status
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
