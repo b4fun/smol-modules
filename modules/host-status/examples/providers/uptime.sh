@@ -5,7 +5,7 @@ set -euo pipefail
 # Reports system uptime
 
 # Get uptime in seconds
-uptime_seconds=$(cat /proc/uptime | cut -d' ' -f1 | cut -d'.' -f1)
+uptime_seconds=$(cut -d' ' -f1 /proc/uptime | cut -d'.' -f1)
 
 # Convert to days, hours, minutes
 days=$((uptime_seconds / 86400))
