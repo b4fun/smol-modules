@@ -12,7 +12,7 @@ func TestProviderExecution(t *testing.T) {
 	// Create a simple test provider script
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "test-provider.sh")
-	
+
 	script := `#!/bin/bash
 cat <<EOF
 {
@@ -36,7 +36,7 @@ EOF
 
 	provider := NewProvider(config)
 	ctx := context.Background()
-	
+
 	result, err := provider.Execute(ctx)
 	if err != nil {
 		t.Fatalf("Provider execution failed: %v", err)
@@ -58,7 +58,7 @@ EOF
 func TestProviderTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "slow-provider.sh")
-	
+
 	script := `#!/bin/bash
 sleep 5
 echo '{"status": "ok", "metrics": {}}'
@@ -75,7 +75,7 @@ echo '{"status": "ok", "metrics": {}}'
 
 	provider := NewProvider(config)
 	ctx := context.Background()
-	
+
 	start := time.Now()
 	result, err := provider.Execute(ctx)
 	duration := time.Since(start)
@@ -98,7 +98,7 @@ echo '{"status": "ok", "metrics": {}}'
 func TestProviderInvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "invalid-provider.sh")
-	
+
 	script := `#!/bin/bash
 echo "not json"
 `
@@ -114,7 +114,7 @@ echo "not json"
 
 	provider := NewProvider(config)
 	ctx := context.Background()
-	
+
 	result, err := provider.Execute(ctx)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -131,7 +131,7 @@ echo "not json"
 
 func TestProviderRegistry(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create two test providers
 	script1Path := filepath.Join(tmpDir, "provider1.sh")
 	script1 := `#!/bin/bash
@@ -160,7 +160,7 @@ EOF
 
 	registry := NewProviderRegistry(configs)
 	ctx := context.Background()
-	
+
 	results := registry.ExecuteAll(ctx)
 
 	if len(results) != 2 {

@@ -9,8 +9,8 @@ import (
 
 // Config represents the host-status configuration
 type Config struct {
-	Pull      PullConfig     `yaml:"pull"`
-	Push      PushConfig     `yaml:"push"`
+	Pull      PullConfig       `yaml:"pull"`
+	Push      PushConfig       `yaml:"push"`
 	Providers []ProviderConfig `yaml:"providers"`
 }
 
@@ -30,17 +30,17 @@ type PushConfig struct {
 
 // PushDestination represents a push target
 type PushDestination struct {
-	URL  string            `yaml:"url"`
-	Auth string            `yaml:"auth"`
+	URL     string            `yaml:"url"`
+	Auth    string            `yaml:"auth"`
 	Headers map[string]string `yaml:"headers"`
 }
 
 // ProviderConfig defines a status provider
 type ProviderConfig struct {
-	Name    string   `yaml:"name"`
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args"`
-	Timeout string   `yaml:"timeout"`
+	Name    string            `yaml:"name"`
+	Command string            `yaml:"command"`
+	Args    []string          `yaml:"args"`
+	Timeout string            `yaml:"timeout"`
 	Env     map[string]string `yaml:"env"`
 }
 

@@ -48,7 +48,7 @@ func (p *Provider) Execute(ctx context.Context) (*ProviderResult, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, p.config.Command, p.config.Args...)
-	
+
 	// Set environment variables
 	if len(p.config.Env) > 0 {
 		for k, v := range p.config.Env {
@@ -131,7 +131,7 @@ func NewProviderRegistry(configs []ProviderConfig) *ProviderRegistry {
 // ExecuteAll runs all providers and returns their results
 func (r *ProviderRegistry) ExecuteAll(ctx context.Context) []*ProviderResult {
 	results := make([]*ProviderResult, 0, len(r.providers))
-	
+
 	for _, provider := range r.providers {
 		result, err := provider.Execute(ctx)
 		if err != nil {
@@ -146,6 +146,6 @@ func (r *ProviderRegistry) ExecuteAll(ctx context.Context) []*ProviderResult {
 		}
 		results = append(results, result)
 	}
-	
+
 	return results
 }
