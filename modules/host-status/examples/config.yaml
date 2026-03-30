@@ -1,0 +1,46 @@
+# Host Status Configuration Example
+
+# Pull-based HTTP server configuration
+pull:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+
+# Push-based periodic reporting configuration
+push:
+  enabled: true
+  interval: "5m"  # 5 minutes (default)
+  destinations:
+    - url: "https://monitoring.example.com/api/status"
+      auth: "Bearer your-token-here"
+      headers:
+        X-Host-ID: "server-001"
+    # - url: "https://backup-monitor.example.com/status"
+    #   auth: "Bearer another-token"
+
+# Status providers
+providers:
+  - name: "cpu"
+    command: "./examples/providers/cpu.sh"
+    timeout: "10s"
+  
+  - name: "memory"
+    command: "./examples/providers/memory.sh"
+    timeout: "10s"
+  
+  - name: "disk"
+    command: "./examples/providers/disk.sh"
+    timeout: "10s"
+  
+  - name: "uptime"
+    command: "./examples/providers/uptime.sh"
+    timeout: "10s"
+
+  # Example of a custom provider with arguments and environment variables
+  # - name: "custom"
+  #   command: "/usr/local/bin/custom-monitor"
+  #   args: ["--format", "json", "--verbose"]
+  #   timeout: "30s"
+  #   env:
+  #     MONITOR_CONFIG: "/etc/monitor/config.json"
+  #     LOG_LEVEL: "info"
