@@ -80,6 +80,16 @@ api_key_env = "OPENAI_API_KEY"            # Environment variable containing your
 # api_key_env = "OPENROUTER_API_KEY"
 
 # ----------------------------------------------------------------------------
+# Shelley (local exe.dev agent)
+# ----------------------------------------------------------------------------
+# Uses the shelley agent running on the same host via its Unix socket.
+# No API key needed — shelley handles LLM credentials internally.
+# [profiles.shelley]
+# backend = "shelley"
+# model = "claude-sonnet-4.5"
+# shelley_url = "unix:///home/USER/.config/shelley/shelley.sock"  # Optional override
+
+# ----------------------------------------------------------------------------
 # Claude via Anthropic SDK (requires SDK adapter)
 # ----------------------------------------------------------------------------
 # Direct Anthropic API access (not OpenAI-compatible)

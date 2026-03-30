@@ -87,10 +87,11 @@ api_key_env = "OPENAI_API_KEY"  # Required: environment variable containing API 
 
 **Field details:**
 
-- **`backend`** (string, optional): Backend type. Default is `"openai"` (OpenAI-compatible HTTP API). Use specific values like `"anthropic"` or `"openai-agents"` only when using SDK-based adapters with different calling conventions.
+- **`backend`** (string, optional): Backend type. Default is `"openai"` (OpenAI-compatible HTTP API). Built-in backends: `"openai"`, `"shelley"` (local [shelley](https://github.com/anthropics/shelley) agent via Unix socket). Use other values like `"anthropic"` or `"openai-agents"` for SDK-based adapters with different calling conventions.
 - **`model`** (string, required): Model identifier (e.g., `"gpt-4o"`, `"claude-sonnet-4-20250514"`, `"llama3"`).
 - **`api_url`** (string, required): Base URL for the API endpoint. For OpenAI: `https://api.openai.com/v1`. For local Ollama: `http://localhost:11434/v1`.
-- **`api_key_env`** (string, required): Name of the environment variable containing the API key. gh-pm reads the key from this env var at runtime.
+- **`api_key_env`** (string, required for openai backend): Name of the environment variable containing the API key. gh-pm reads the key from this env var at runtime.
+- **`shelley_url`** (string, optional): Socket URL for the shelley backend. Defaults to `unix:///home/$USER/.config/shelley/shelley.sock`. Can also be an `http://` URL.
 
 **Example profiles:**
 
@@ -112,6 +113,11 @@ api_key_env = "OLLAMA_API_KEY"  # Can be dummy if Ollama doesn't require auth
 model = "anthropic/claude-sonnet-4-20250514"
 api_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
+
+# Shelley (local exe.dev agent — no API key needed)
+[profiles.shelley]
+backend = "shelley"
+model = "claude-sonnet-4.5"
 ```
 
 ## CLI Usage

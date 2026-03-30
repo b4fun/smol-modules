@@ -19,11 +19,17 @@ llm_call() {
   local backend
   backend="$(config_get_profile_field "$profile" backend)"
 
-  if [[ -z "$backend" ]]; then
-    _llm_call_openai_compat "$profile" "$system_prompt" "$user_prompt"
-  else
-    _llm_call_backend "$backend" "$profile" "$system_prompt" "$user_prompt"
-  fi
+  case "${backend:-openai}" in
+    openai|"")
+      _llm_call_openai_compat "$profile" "$system_prompt" "$user_prompt"
+      ;;
+    shelley)
+      _llm_call_shelley "$profile" "$system_prompt" "$user_prompt"
+      ;;
+    *)
+      _llm_call_backend "$backend" "$profile" "$system_prompt" "$user_prompt"
+      ;;
+  esac
 }
 
 # _llm_call_openai_compat PROFILE SYSTEM USER — OpenAI-compatible HTTP call.
@@ -83,6 +89,65 @@ _llm_call_openai_compat() {
     log_error "llm" "Empty response from LLM"
     return 1
   fi
+  echo "$content"
+}
+
+# _llm_call_shelley PROFILE SYSTEM USER — call shelley agent via CLI.
+_llm_call_shelley() {
+  local profile="$1" system_prompt="$2" user_prompt="$3"
+
+  local shelley_url model
+  shelley_url="$(config_get_profile_field "$profile" shelley_url)"
+  shelley_url="${shelley_url:-unix:///home/${USER}/.config/shelley/shelley.sock}"
+  model="$(config_get_profile_field "$profile" model)"
+
+  if ! command -v shelley &>/dev/null; then
+    log_error "llm" "shelley CLI not found in PATH"
+    return 1
+  fi
+
+  # Combine system + user prompts (shelley client has no separate system prompt)
+  local combined_prompt="${system_prompt}
+
+---
+
+${user_prompt}"
+
+  local chat_args=(client -url "$shelley_url" chat -p "$combined_prompt")
+  if [[ -n "$model" ]]; then
+    chat_args+=(-model "$model")
+  fi
+
+  local chat_response
+  if ! chat_response="$(shelley "${chat_args[@]}" 2>/dev/null)"; then
+    log_error "llm" "shelley chat request failed"
+    return 1
+  fi
+
+  local conv_id
+  conv_id="$(echo "$chat_response" | jq -r '.conversation_id // empty')"
+  if [[ -z "$conv_id" ]]; then
+    log_error "llm" "No conversation_id in shelley response"
+    return 1
+  fi
+
+  log_debug "llm" "shelley conversation: $conv_id"
+
+  # Wait for the agent turn to complete and extract the final response
+  local read_output
+  if ! read_output="$(shelley client -url "$shelley_url" read -wait "$conv_id" 2>/dev/null)"; then
+    log_error "llm" "shelley read failed for conversation $conv_id"
+    return 1
+  fi
+
+  # Extract the last agent message with end_of_turn=true
+  local content
+  content="$(echo "$read_output" | jq -rs '[.[] | select(.type=="agent" and .end_of_turn==true)] | last | .text // empty')"
+  if [[ -z "$content" ]]; then
+    log_error "llm" "Empty response from shelley agent"
+    return 1
+  fi
+
   echo "$content"
 }
 
