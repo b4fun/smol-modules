@@ -8,6 +8,7 @@ A GitHub-native project manager agent that watches for assigned tasks (issues, P
 
 - **GitHub CLI** (`gh`) — Install and authenticate: `gh auth login`
 - **jq**, **curl**, **bash** — Standard Unix tools
+- **[toml2json](https://github.com/woodruffw/toml2json)** — TOML-to-JSON converter (`cargo install toml2json`)
 - Or use Nix: `nix develop` (provides all dependencies)
 
 ### 2. Create Configuration

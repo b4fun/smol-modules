@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # gh-pm/lib/config.sh — Configuration management
-# Parses gh-pm.toml and provides config access functions.
+# Parses gh-pm.toml via toml2json + jq and provides config access functions.
 
 # Global config storage
 declare -g -A _GHPM_SETTINGS=()
@@ -30,65 +30,50 @@ config_load() {
     return 0
   fi
 
-  local current_section=""
+  # Parse TOML to JSON using toml2json
+  local json
+  if ! json="$(toml2json < "$config_file")"; then
+    echo "gh-pm: error: failed to parse config file: $config_file" >&2
+    return 1
+  fi
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    # Strip leading/trailing whitespace
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-
-    # Skip empty lines and comments
-    [[ -z "$line" || "$line" == \#* ]] && continue
-
-    # Section headers: [settings] or [profiles.name]
-    if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
-      current_section="${BASH_REMATCH[1]}"
-      continue
+  # Load [settings] scalars
+  local -a setting_keys=(poll_interval workflow_timeout max_retries log_level log_file workflow_command)
+  for key in "${setting_keys[@]}"; do
+    local val
+    val="$(echo "$json" | jq -r ".settings.${key} // empty")"
+    if [[ -n "$val" ]]; then
+      _GHPM_SETTINGS["$key"]="$val"
     fi
+  done
 
-    # Key = value pairs
-    if [[ "$line" =~ ^([a-zA-Z_][a-zA-Z0-9_]*)[\ ]*=[\ ]*(.+)$ ]]; then
-      local key="${BASH_REMATCH[1]}"
-      local value="${BASH_REMATCH[2]}"
+  # Load [settings].repos array
+  local repo_count
+  repo_count="$(echo "$json" | jq '.settings.repos // [] | length')"
+  if [[ "$repo_count" -gt 0 ]]; then
+    _GHPM_REPOS=()
+    local i
+    for (( i=0; i<repo_count; i++ )); do
+      _GHPM_REPOS+=("$(echo "$json" | jq -r ".settings.repos[$i]")")
+    done
+  fi
 
-      # Strip inline comments (outside quotes)
-      if [[ "$value" =~ ^\".*\"$ ]] || [[ "$value" =~ ^\[.*\]$ ]]; then
-        : # keep as-is for quoted strings and arrays
-      else
-        value="${value%%#*}"
-        value="${value%"${value##*[![:space:]]}"}"
+  # Load [profiles.*] sections
+  local profile_names
+  profile_names="$(echo "$json" | jq -r '.profiles // {} | keys[]')"
+  while IFS= read -r profile_name; do
+    [[ -z "$profile_name" ]] && continue
+    local profile_keys
+    profile_keys="$(echo "$json" | jq -r ".profiles[\"${profile_name}\"] // {} | keys[]")"
+    while IFS= read -r field; do
+      [[ -z "$field" ]] && continue
+      local field_val
+      field_val="$(echo "$json" | jq -r ".profiles[\"${profile_name}\"][\"${field}\"] // empty")"
+      if [[ -n "$field_val" ]]; then
+        _GHPM_PROFILES["${profile_name}.${field}"]="$field_val"
       fi
-
-      # Handle arrays: repos = ["a", "b"]
-      if [[ "$value" =~ ^\[(.*)\]$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        if [[ "$key" == "repos" && "$current_section" == "settings" ]]; then
-          _GHPM_REPOS=()
-          # Extract quoted strings from the array
-          local tmp="$inner"
-          while [[ "$tmp" =~ \"([^\"]+)\" ]]; do
-            _GHPM_REPOS+=("${BASH_REMATCH[1]}")
-            tmp="${tmp#*\"${BASH_REMATCH[1]}\"}"
-          done
-        fi
-        continue
-      fi
-
-      # Strip quotes from string values
-      if [[ "$value" =~ ^\"(.*)\"$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      fi
-
-      if [[ "$current_section" == "settings" ]]; then
-        _GHPM_SETTINGS["$key"]="$value"
-      elif [[ "$current_section" =~ ^profiles\.(.+)$ ]]; then
-        local profile_name="${BASH_REMATCH[1]}"
-        _GHPM_PROFILES["${profile_name}.${key}"]="$value"
-      fi
-    fi
-  done < "$config_file"
+    done <<< "$profile_keys"
+  done <<< "$profile_names"
 }
 
 # config_get_setting KEY — get a setting value.
