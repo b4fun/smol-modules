@@ -30,21 +30,45 @@ A task is "new" if gh-pm hasn't processed it yet (tracked via GitHub-side state;
 
 ### 3. Configurable LLM backend
 
-The LLM call for task analysis is behind a pluggable backend. gh-pm ships a thin calling convention — a function that takes a prompt and returns a response — with adapters for:
+The LLM call for task analysis is behind a pluggable backend. Each provider is modeled as an **LLM provider profile** — a named configuration block that bundles the backend type, model, credentials, and any provider-specific settings.
 
-- **Raw HTTP API** — any OpenAI-compatible chat endpoint (covers OpenRouter, self-hosted, etc.)
-- **Provider SDKs** — OpenAI Agents SDK, Anthropic SDK, Copilot SDK, etc.
+#### Provider profiles
 
-Adapter selection is via environment variable or config file. The raw HTTP adapter is the default since it works everywhere and keeps the bash implementation simple. SDK-based adapters can shell out to a small wrapper script/binary in the adapter's language.
+Profiles are defined in a config file (`ghpm.toml` or `ghpm.json`):
 
-Configuration surface:
+```toml
+[profiles.default]
+backend = "raw"           # raw OpenAI-compatible HTTP
+model   = "gpt-4o"
+api_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"   # read key from this env var
 
-| Variable | Purpose |
-|---|---|
-| `GHPM_LLM_BACKEND` | Adapter name (`raw`, `openrouter`, `openai`, `anthropic`, `copilot`, …) |
-| `GHPM_LLM_MODEL` | Model identifier (e.g. `gpt-4o`, `claude-sonnet-4-20250514`) |
-| `GHPM_LLM_API_KEY` | API key (for raw / provider adapters) |
-| `GHPM_LLM_API_URL` | Base URL (for raw adapter, defaults to `https://api.openai.com/v1`) |
+[profiles.claude]
+backend = "raw"
+model   = "claude-sonnet-4-20250514"
+api_url = "https://api.anthropic.com/v1"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[profiles.local]
+backend = "raw"
+model   = "llama3"
+api_url = "http://localhost:11434/v1"
+```
+
+The active profile is selected by (in priority order):
+
+1. **Task-level override** — a GitHub label on the issue/PR (e.g. `ghpm:profile=claude`) selects the profile for that task.
+2. **Environment variable** — `GHPM_LLM_PROFILE=claude`.
+3. **Config default** — the profile named `default`.
+
+This lets users route different tasks to different models. For example, a label `ghpm:profile=local` on a low-priority issue uses a local model, while critical tasks use a frontier model.
+
+#### Supported backends
+
+- **`raw`** — any OpenAI-compatible chat endpoint (covers OpenRouter, self-hosted, etc.). Default.
+- **Provider SDKs** — OpenAI Agents SDK, Anthropic SDK, Copilot SDK, etc. These shell out to a small wrapper script/binary in the adapter's language.
+
+The `raw` backend is the default since it works everywhere and keeps the bash implementation simple.
 
 ### 4. Directory-based workflow protocol
 
@@ -90,6 +114,16 @@ $GHPM_WORKSPACE/
 ```
 
 gh-pm detects completion by the presence of `result.json`.
+
+#### Restart recovery
+
+On startup, gh-pm scans `$GHPM_WORKSPACE/` for existing task directories and reconciles their state:
+
+- **Has `result.json`** → treat as completed; report to GitHub if not already reported.
+- **Has `status.json` but no `result.json`** → workflow was in-flight; resume monitoring. If the workflow process is no longer running (for process-spawn adapter), mark as interrupted and report.
+- **Has `task.json` only** → dispatch was written but workflow never started; re-dispatch.
+
+This makes gh-pm resilient to crashes and restarts. The workspace directory is the source of truth for in-flight work, and GitHub comments are the source of truth for what's been reported.
 
 **Process-spawn adapter.** For convenience, gh-pm includes a built-in adapter that implements this protocol by spawning a subprocess. It writes `task.json`, runs the configured command (passing the task directory as an argument), and expects the process to write `status.json` / `result.json` before exiting. This lets users plug in any existing tool without teaching it the directory protocol directly — the adapter script bridges the gap.
 
