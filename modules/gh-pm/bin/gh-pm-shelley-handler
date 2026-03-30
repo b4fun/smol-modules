@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# gh-pm-shelley-handler — Workflow handler that delegates tasks to shelley.
+#
+# Usage: gh-pm-shelley-handler TASK_DIR
+#
+# Reads task.json from TASK_DIR, sends the analysis to shelley for execution,
+# streams progress into status.json, and writes result.json when done.
+#
+# Environment:
+#   GH_PM_SHELLEY_URL    Shelley socket URL (default: unix:///home/$USER/.config/shelley/shelley.sock)
+#   GH_PM_SHELLEY_MODEL  Model override (default: from task analysis or claude-sonnet-4.5)
+
+TASK_DIR="${1:?Usage: gh-pm-shelley-handler TASK_DIR}"
+
+if [[ ! -f "$TASK_DIR/task.json" ]]; then
+  echo "Error: $TASK_DIR/task.json not found" >&2
+  exit 1
+fi
+
+SHELLEY_URL="${GH_PM_SHELLEY_URL:-unix:///home/${USER}/.config/shelley/shelley.sock}"
+SHELLEY_MODEL="${GH_PM_SHELLEY_MODEL:-claude-sonnet-4.5}"
+
+# --- Read task ---
+task_id="$(jq -r '.id' "$TASK_DIR/task.json")"
+title="$(jq -r '.title // ""' "$TASK_DIR/task.json")"
+body="$(jq -r '.body // ""' "$TASK_DIR/task.json")"
+analysis="$(jq -r '.analysis // ""' "$TASK_DIR/task.json")"
+source_repo="$(jq -r '.source.repo // ""' "$TASK_DIR/task.json")"
+source_type="$(jq -r '.source.type // ""' "$TASK_DIR/task.json")"
+source_number="$(jq -r '.source.number // ""' "$TASK_DIR/task.json")"
+
+# --- Build prompt ---
+prompt="You are a workflow execution agent. Execute the following task and report what you accomplished.
+
+Repository: ${source_repo}
+${source_type^} #${source_number}: ${title}
+
+Description:
+${body}
+
+Analysis & Instructions:
+${analysis}
+
+Please execute the task described above. When done, provide a clear summary of what was accomplished."
+
+# --- Write initial status ---
+jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{state:"running", message:"Sending task to shelley agent", updated_at:$ts}' \
+  > "$TASK_DIR/status.json"
+
+# --- Send to shelley ---
+chat_args=(client -url "$SHELLEY_URL" chat -p "$prompt" -model "$SHELLEY_MODEL" -cwd "$TASK_DIR")
+
+chat_response="$(shelley "${chat_args[@]}" 2>/dev/null)" || {
+  jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{state:"failed", error:"shelley chat request failed", completed_at:$ts}' \
+    > "$TASK_DIR/result.json"
+  exit 1
+}
+
+conv_id="$(echo "$chat_response" | jq -r '.conversation_id // empty')"
+if [[ -z "$conv_id" ]]; then
+  jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{state:"failed", error:"No conversation_id from shelley", completed_at:$ts}' \
+    > "$TASK_DIR/result.json"
+  exit 1
+fi
+
+# --- Update status with conversation ID ---
+jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg cid "$conv_id" \
+  '{state:"running", message:("shelley agent working (conversation: " + $cid + ")"), updated_at:$ts}' \
+  > "$TASK_DIR/status.json"
+
+# --- Wait for completion ---
+read_output="$(shelley client -url "$SHELLEY_URL" read -wait "$conv_id" 2>/dev/null)" || {
+  jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg cid "$conv_id" \
+    '{state:"failed", error:("shelley read failed for conversation " + $cid), completed_at:$ts}' \
+    > "$TASK_DIR/result.json"
+  exit 1
+}
+
+# --- Extract final response ---
+agent_response="$(echo "$read_output" | jq -rs '[.[] | select(.type=="agent" and .end_of_turn==true)] | last | .text // empty')"
+
+if [[ -z "$agent_response" ]]; then
+  jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{state:"failed", error:"Empty response from shelley agent", completed_at:$ts}' \
+    > "$TASK_DIR/result.json"
+  exit 1
+fi
+
+# --- Write result ---
+jq -n --arg summary "$agent_response" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg cid "$conv_id" \
+  '{state:"done", summary:$summary, shelley_conversation:$cid, completed_at:$ts}' \
+  > "$TASK_DIR/result.json"
