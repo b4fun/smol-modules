@@ -24,6 +24,7 @@ config_load() {
   _GHPM_SETTINGS[log_level]="$_GHPM_DEFAULTS_LOG_LEVEL"
   _GHPM_SETTINGS[log_file]=""
   _GHPM_SETTINGS[workflow_command]=""
+  _GHPM_SETTINGS[workflow_policy]=""
   _GHPM_REPOS=()
 
   if [[ ! -f "$config_file" ]]; then
@@ -38,7 +39,7 @@ config_load() {
   fi
 
   # Load [settings] scalars
-  local -a setting_keys=(poll_interval workflow_timeout max_retries log_level log_file workflow_command)
+  local -a setting_keys=(poll_interval workflow_timeout max_retries log_level log_file workflow_command workflow_policy)
   for key in "${setting_keys[@]}"; do
     local val
     val="$(echo "$json" | jq -r ".settings.${key} // empty")"

@@ -30,9 +30,28 @@ analysis="$(jq -r '.analysis // ""' "$TASK_DIR/task.json")"
 source_repo="$(jq -r '.source.repo // ""' "$TASK_DIR/task.json")"
 source_type="$(jq -r '.source.type // ""' "$TASK_DIR/task.json")"
 source_number="$(jq -r '.source.number // ""' "$TASK_DIR/task.json")"
+policy="$(jq -r '.policy // ""' "$TASK_DIR/task.json")"
+
+# --- Default policy if none configured ---
+if [[ -z "$policy" ]]; then
+  policy="You MUST follow these rules:
+- Do NOT merge pull requests
+- Do NOT push directly to the main/master branch
+- Do NOT delete branches or repositories
+- Do NOT modify GitHub repository settings
+- Do NOT approve your own pull requests
+- Work on a feature branch and open a pull request for review
+- All changes require human review before merging"
+fi
 
 # --- Build prompt ---
 prompt="You are a workflow execution agent. Execute the following task and report what you accomplished.
+
+## POLICY — You MUST obey these rules:
+
+${policy}
+
+---
 
 Repository: ${source_repo}
 ${source_type^} #${source_number}: ${title}

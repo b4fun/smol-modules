@@ -61,6 +61,7 @@ max_retries = 3                             # Optional: max retry attempts for t
 log_level = "INFO"                          # Optional: DEBUG|INFO|WARN|ERROR (default: INFO)
 log_file = "~/.gh-pm/gh-pm.log"            # Optional: path to global log file (default: stderr only)
 workflow_command = "/path/to/script"        # Required: command to dispatch workflows
+workflow_policy = "..."                     # Optional: guardrails for the workflow agent
 ```
 
 **Field details:**
@@ -72,6 +73,30 @@ workflow_command = "/path/to/script"        # Required: command to dispatch work
 - **`log_level`** (string, default: "INFO"): Logging verbosity. Options: `DEBUG`, `INFO`, `WARN`, `ERROR`.
 - **`log_file`** (string, optional): Path to global log file. If unset, logs go to stderr. Expands `~` to home directory.
 - **`workflow_command`** (string, required): Command to execute when dispatching a workflow. Receives the task directory path as an argument.
+- **`workflow_policy`** (string, optional): Policy rules injected into the workflow agent prompt. Used by `gh-pm-shelley-handler` to constrain what the agent is allowed to do. If unset, a safe default policy is applied that prevents merging PRs, pushing to main, and other destructive actions. See [Workflow Policy](#workflow-policy) below.
+
+### Workflow Policy
+
+When using an LLM-based workflow handler (like `gh-pm-shelley-handler`), the `workflow_policy` setting defines guardrails the agent **must** follow. This prevents the agent from taking destructive actions without human approval.
+
+**Default policy** (applied when `workflow_policy` is empty):
+
+- Do NOT merge pull requests
+- Do NOT push directly to main/master branch
+- Do NOT delete branches or repositories
+- Do NOT modify GitHub repository settings
+- Do NOT approve your own pull requests
+- Work on a feature branch and open a pull request for review
+- All changes require human review before merging
+
+**Custom policy example:**
+
+```toml
+[settings]
+workflow_policy = "Do NOT merge PRs. Do NOT push to main. Always open a PR. Do NOT modify CI/CD configs."
+```
+
+The policy is stored in `task.json` and injected at the top of the agent prompt with a `## POLICY` header.
 
 ### `[profiles.<name>]` Section
 

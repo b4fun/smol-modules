@@ -41,6 +41,20 @@ log_file = "~/.gh-pm/gh-pm.log"
 # Example: "/home/user/bin/my-workflow-handler"
 workflow_command = "/path/to/your/workflow-script"
 
+# workflow_policy - Rules the workflow agent must follow
+# This is injected into the agent prompt when using gh-pm-shelley-handler.
+# If unset, a safe default policy is used that prevents merging PRs,
+# pushing to main, and other destructive actions.
+# Override to customize what the agent is allowed to do.
+#
+# Default (applied automatically when empty):
+#   - Do NOT merge pull requests
+#   - Do NOT push directly to main/master
+#   - Do NOT delete branches or repositories
+#   - Work on feature branches, open PRs for human review
+#
+# workflow_policy = "Do NOT merge PRs. Do NOT push to main. Always open a PR for review."
+
 # Shelley workflow handler example:
 # If using shelley as your workflow executor, point to the bundled handler:
 # workflow_command = "/full/path/to/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"

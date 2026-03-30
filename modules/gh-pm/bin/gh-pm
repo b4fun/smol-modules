@@ -137,6 +137,9 @@ ${comments_text}"
   fi
 
   # Write task.json (matching design spec schema)
+  local workflow_policy
+  workflow_policy="$(config_get_setting workflow_policy)"
+
   jq -n \
     --arg id "$task_id" \
     --arg source_type "$type" \
@@ -146,6 +149,7 @@ ${comments_text}"
     --arg title "$title" \
     --arg body "$body" \
     --arg analysis "$analysis" \
+    --arg policy "$workflow_policy" \
     --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{
       id: $id,
@@ -153,6 +157,7 @@ ${comments_text}"
       title: $title,
       body: $body,
       analysis: $analysis,
+      policy: $policy,
       created_at: $created_at
     }' > "$task_dir/task.json"
 
