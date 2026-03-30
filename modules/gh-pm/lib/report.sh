@@ -2,6 +2,29 @@
 # gh-pm/lib/report.sh — GitHub reporting
 # Posts and updates tracking comments on issues/PRs.
 
+# report_analyzing REPO NUMBER TASK_ID PROFILE
+report_analyzing() {
+  local repo="$1" number="$2" task_id="$3" profile="${4:-default}"
+  local marker="<!-- gh-pm:${task_id} -->"
+  local ts
+  ts="$(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)"
+
+  local body="${marker}
+## 🤖 gh-pm: Analyzing Task
+
+| Field | Value |
+|-------|-------|
+| Task ID | \`${task_id}\` |
+| Status | 🔍 Analyzing |
+| Profile | \`${profile}\` |
+| Started | ${ts} |
+
+_Analyzing with LLM before dispatching workflow…_"
+
+  log_info "report" "Posting analyzing comment $repo#$number task=$task_id"
+  gh_post_comment "$repo" "$number" "$body"
+}
+
 # report_dispatch REPO NUMBER TASK_ID
 report_dispatch() {
   local repo="$1" number="$2" task_id="$3"
@@ -21,7 +44,13 @@ report_dispatch() {
 _Managed by gh-pm. Updates will follow._"
 
   log_info "report" "Posting dispatch comment $repo#$number task=$task_id"
-  gh_post_comment "$repo" "$number" "$body"
+  local comment_id
+  comment_id="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
+  if [[ -n "$comment_id" ]]; then
+    gh_update_comment "$repo" "$comment_id" "$body"
+  else
+    gh_post_comment "$repo" "$number" "$body"
+  fi
 }
 
 # report_status REPO NUMBER TASK_ID STATUS_MSG

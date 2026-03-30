@@ -101,6 +101,9 @@ process_item() {
   mkdir -p "$task_dir"
   log_task_init "$task_id"
 
+  # Post early "analyzing" comment so the issue gets immediate feedback
+  report_analyzing "$repo" "$number" "$task_id" "$profile" || true
+
   # Gather context: comments
   local comments_json
   comments_json="$(gh_get_comments "$repo" "$type" "$number")"
