@@ -41,6 +41,17 @@ log_file = "~/.gh-pm/gh-pm.log"
 # Example: "/home/user/bin/my-workflow-handler"
 workflow_command = "/path/to/your/workflow-script"
 
+# Shelley workflow handler example:
+# If using shelley as your workflow executor, point to the bundled handler:
+# workflow_command = "/full/path/to/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+# 
+# The shelley handler supports these environment variables:
+#   GH_PM_SHELLEY_URL    - Shelley socket URL (default: unix:///home/$USER/.config/shelley/shelley.sock)
+#   GH_PM_SHELLEY_MODEL  - Model override (default: claude-sonnet-4.5)
+# 
+# Example with shelley:
+# workflow_command = "/home/exedev/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+
 # ============================================================================
 # LLM Provider Profiles
 # ============================================================================

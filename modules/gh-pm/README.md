@@ -120,6 +120,259 @@ backend = "shelley"
 model = "claude-sonnet-4.5"
 ```
 
+## Using Shelley as LLM Backend
+
+On [exe.dev](https://exe.dev) VMs, you can use **shelley** as your LLM backend. Shelley is a local AI agent that runs on the same host, eliminating the need for external API keys and enabling fully offline operation.
+
+### Benefits
+
+- **Zero API keys required** — shelley manages LLM credentials internally
+- **Works offline** — no external API calls from gh-pm
+- **Same host execution** — low latency, no network dependency
+- **Multiple model support** — shelley supports OpenAI, Anthropic, and other providers
+
+### Configuration
+
+To use shelley as your LLM backend, set `backend = "shelley"` in your profile:
+
+```toml
+[profiles.default]
+backend = "shelley"
+model = "claude-sonnet-4.5"
+```
+
+**Configuration fields:**
+
+- **`backend`** (required): Set to `"shelley"` to use the shelley backend
+- **`model`** (required): Model identifier supported by shelley (e.g., `"claude-sonnet-4.5"`, `"gpt-5.4"`, `"claude-opus-4.6"`)
+- **`shelley_url`** (optional): Shelley socket URL. Defaults to `unix:///home/$USER/.config/shelley/shelley.sock`. Can be a Unix socket (`unix://`) or HTTP URL (`http://`)
+- **`api_key_env`** (not used): Not required for shelley backend; shelley handles authentication internally
+
+### Verify Shelley Availability
+
+Before configuring gh-pm to use shelley, verify it's running:
+
+```bash
+shelley client -url unix:///home/$USER/.config/shelley/shelley.sock version
+```
+
+If shelley is not running or not installed, see [shelley documentation](https://exe.dev/docs.md) for setup instructions.
+
+### Example Configuration
+
+```toml
+[profiles.default]
+backend = "shelley"
+model = "claude-sonnet-4.5"
+# shelley_url = "unix:///home/myuser/.config/shelley/shelley.sock"  # Optional: override default
+```
+
+With this configuration, gh-pm will send task analysis requests to shelley instead of calling external APIs directly.
+
+## Using Shelley as Workflow Handler
+
+In addition to using shelley as the LLM backend for task analysis, you can delegate the entire workflow execution to shelley using the **`gh-pm-shelley-handler`** script.
+
+### What It Does
+
+The shelley workflow handler:
+
+1. Reads the task definition and LLM analysis from `task.json`
+2. Constructs a prompt with the task details and instructions
+3. Sends the prompt to shelley via its socket API
+4. Streams progress updates to `status.json`
+5. Writes the final result to `result.json` when shelley completes the task
+
+This approach lets shelley autonomously execute the task using its full agent capabilities (tool use, file operations, command execution, etc.).
+
+### Configuration
+
+**1. Set the workflow command** in your `gh-pm.toml`:
+
+```toml
+[settings]
+workflow_command = "/full/path/to/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+```
+
+**Important:** Use an absolute path. If you installed gh-pm from a git clone, this might be:
+
+```bash
+workflow_command = "/home/exedev/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+```
+
+**2. Optional environment variables** (can be set in `~/.gh-pm/env` if using systemd):
+
+- **`GH_PM_SHELLEY_URL`** — Shelley socket URL  
+  Default: `unix:///home/$USER/.config/shelley/shelley.sock`
+  
+- **`GH_PM_SHELLEY_MODEL`** — Model to use for workflow execution  
+  Default: `claude-sonnet-4.5`
+
+### Handler Script Location
+
+The handler is located at:
+
+```
+modules/gh-pm/bin/gh-pm-shelley-handler
+```
+
+It's a standalone bash script that uses the `shelley` CLI to communicate with the shelley agent.
+
+### How It Works
+
+When gh-pm dispatches a task:
+
+1. **Handler reads `task.json`** from the task directory
+2. **Builds a prompt** containing:
+   - Repository information
+   - Issue/PR title and body
+   - LLM analysis and instructions from gh-pm
+3. **Sends prompt to shelley** via `shelley client chat`
+4. **Monitors conversation** and waits for completion
+5. **Extracts result** from shelley's final response
+6. **Writes `result.json`** with:
+   - `state`: "done" or "failed"
+   - `summary`: Shelley's response describing what was accomplished
+   - `shelley_conversation`: Conversation ID for debugging
+
+### Example Configuration
+
+```toml
+[settings]
+repos = ["owner/repo"]
+workflow_command = "/home/exedev/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+
+[profiles.default]
+backend = "shelley"
+model = "claude-sonnet-4.5"
+```
+
+With this setup:
+- gh-pm uses shelley to analyze incoming tasks
+- gh-pm uses shelley to execute the tasks
+- No external API keys needed anywhere
+
+## Complete Shelley Setup (Zero External APIs)
+
+This guide shows how to run gh-pm entirely with shelley on an [exe.dev](https://exe.dev) VM, requiring **no external API keys**.
+
+### Prerequisites
+
+1. **Running on an exe.dev VM** with shelley available
+2. **GitHub CLI authenticated**: `gh auth login`
+3. **shelley is running** and accessible via its Unix socket
+
+### Step 1: Verify Shelley
+
+Check that shelley is available:
+
+```bash
+shelley client -url unix:///home/$USER/.config/shelley/shelley.sock version
+```
+
+You should see shelley's version information. If not, see [exe.dev docs](https://exe.dev/docs.md) for shelley setup.
+
+### Step 2: Create Configuration
+
+Create `~/.gh-pm/gh-pm.toml`:
+
+```toml
+[settings]
+# Repositories to monitor
+repos = ["your-org/your-repo"]
+
+# Polling interval
+poll_interval = 60
+
+# Workflow handler (use absolute path)
+workflow_command = "/home/exedev/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
+
+# Logging
+log_level = "INFO"
+log_file = "~/.gh-pm/gh-pm.log"
+
+# LLM profile using shelley
+[profiles.default]
+backend = "shelley"
+model = "claude-sonnet-4.5"
+```
+
+**Adjust the paths:**
+- Replace `/home/exedev/smol-modules` with your actual git clone path
+- Replace `your-org/your-repo` with your GitHub repository
+
+### Step 3: Test Configuration
+
+Run a dry-run test:
+
+```bash
+cd /path/to/smol-modules
+./modules/gh-pm/bin/gh-pm --dry-run --once
+```
+
+You should see gh-pm poll GitHub and report what it would do (without making changes).
+
+### Step 4: Run gh-pm
+
+**Option A: Foreground (for testing)**
+
+```bash
+./modules/gh-pm/bin/gh-pm
+```
+
+**Option B: Systemd service (production)**
+
+Since no API keys are needed, you can skip the `~/.gh-pm/env` file:
+
+```bash
+# Install as systemd user service
+bash modules/gh-pm/install.sh
+
+# Start the service
+systemctl --user start gh-pm.service
+
+# Check status
+systemctl --user status gh-pm.service
+
+# View logs
+journalctl --user -u gh-pm.service -f
+```
+
+### How It Works
+
+1. **gh-pm polls GitHub** for issues/PRs assigned to you
+2. **shelley analyzes** the task and generates a breakdown (LLM backend)
+3. **gh-pm dispatches** the task to `gh-pm-shelley-handler`
+4. **shelley executes** the task autonomously (workflow handler)
+5. **gh-pm reports** progress and results back to GitHub
+
+### Advantages
+
+- **Zero API keys** — shelley manages credentials
+- **Fully local** — all execution happens on the VM
+- **Audit trail** — shelley conversations are logged and accessible via conversation ID
+- **Flexible models** — shelley supports multiple LLM providers
+
+### Troubleshooting
+
+**shelley connection errors:**
+
+If gh-pm or the handler can't connect to shelley:
+
+1. Check shelley is running: `ps aux | grep shelley`
+2. Verify socket exists: `ls -l ~/.config/shelley/shelley.sock`
+3. Check permissions: socket should be readable by your user
+4. Try explicit URL: set `shelley_url` in profile or `GH_PM_SHELLEY_URL` env var
+
+**Workflow timeout:**
+
+Long-running tasks may exceed `workflow_timeout`. Increase it in settings:
+
+```toml
+[settings]
+workflow_timeout = 7200  # 2 hours
+```
+
 ## CLI Usage
 
 ```bash
