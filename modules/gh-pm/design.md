@@ -21,20 +21,16 @@ The core loop runs continuously: poll → analyze → dispatch → **monitor** �
 gh-pm uses a single workspace directory (`$GH_PM_WORKSPACE`, default `~/.gh-pm/workspace`) as the source of truth for all in-flight work:
 
 ```
-$GH_PM_WORKSPACE/
-  <task-id>/
-    task.json          # task definition + LLM analysis (written by gh-pm)
-    status.json        # progress updates (written by workflow)
-    result.json        # final output (written by workflow)
-    dispatch.json      # dispatch metadata: PID, timestamps, attempt count (written by gh-pm)
-```
-
-The config file and profiles live alongside:
-
-```
 ~/.gh-pm/
-  gh-pm.toml           # config file with LLM profiles, poll interval, timeouts
-  workspace/           # task directories (see above)
+  gh-pm.toml             # config: LLM profiles, poll interval, timeouts
+  gh-pm.log              # global log (if log_file is set)
+  workspace/
+    <task-id>/
+      task.json          # task definition + LLM analysis (written by gh-pm)
+      dispatch.json      # dispatch metadata: PID, timestamps, attempt count (written by gh-pm)
+      status.json        # progress updates (written by workflow)
+      result.json        # final output (written by workflow)
+      gh-pm.log          # per-task log (written by gh-pm)
 ```
 
 See §4 for the full protocol and file schemas.
@@ -47,7 +43,16 @@ All GitHub interaction goes through the `gh` CLI, reusing whatever auth the user
 
 ### 2. Polling for task discovery
 
-gh-pm polls GitHub on a configurable interval. No webhooks, no server to expose. This fits the single-host model and avoids infrastructure. The poll fetches:
+gh-pm polls GitHub on a configurable interval. No webhooks, no server to expose. This fits the single-host model and avoids infrastructure.
+
+The poll scope is configured as a list of repos:
+
+```toml
+[settings]
+repos = ["owner/repo-a", "owner/repo-b"]
+```
+
+For each repo, gh-pm fetches:
 
 - Issues assigned to the authenticated user
 - PRs assigned to the authenticated user (including review requests)
@@ -55,13 +60,15 @@ gh-pm polls GitHub on a configurable interval. No webhooks, no server to expose.
 
 A task is "new" if gh-pm hasn't processed it yet (tracked via GitHub-side state; see §5).
 
+**Task IDs** are derived from the GitHub source: `<owner>-<repo>-<type>-<number>` (e.g. `b4fun-smol-modules-issue-42`). This keeps IDs deterministic, human-readable, and maps 1:1 to workspace directories.
+
 ### 3. Configurable LLM backend
 
 The LLM call for task analysis is behind a pluggable backend. Each provider is modeled as an **LLM provider profile** — a named configuration block that bundles the backend type, model, credentials, and any provider-specific settings.
 
 #### Provider profiles
 
-Profiles are defined in a config file (`gh-pm.toml` or `gh-pm.json`):
+Profiles are defined in the config file (`~/.gh-pm/gh-pm.toml`, overridable via `GH_PM_CONFIG`):
 
 ```toml
 [profiles.default]
@@ -70,9 +77,14 @@ api_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"   # read key from this env var
 
 [profiles.claude]
+backend = "anthropic"     # Anthropic has a different API format, needs SDK adapter
 model   = "claude-sonnet-4-20250514"
-api_url = "https://api.anthropic.com/v1"
 api_key_env = "ANTHROPIC_API_KEY"
+
+[profiles.claude-openrouter]
+model   = "anthropic/claude-sonnet-4-20250514"    # via OpenRouter (OpenAI-compatible)
+api_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
 
 [profiles.local]
 model   = "llama3"
@@ -96,7 +108,7 @@ This lets users route different tasks to different models. For example, a label 
 
 #### Supported backends
 
-- **(default, no `backend` field)** — plain OpenAI-compatible HTTP chat endpoint. Works with OpenRouter, Anthropic, self-hosted, or any provider that speaks the OpenAI chat format. This is the common path and needs no extra tooling.
+- **(default, no `backend` field)** — plain OpenAI-compatible HTTP chat endpoint. Works with OpenRouter, self-hosted models, or any provider that speaks the OpenAI chat completions format. This is the common path and needs no extra tooling.
 - **`openai-agents`** — OpenAI Agents SDK. Shells out to a wrapper.
 - **`anthropic`** — Anthropic SDK. Shells out to a wrapper.
 - **`copilot`** — Copilot SDK. Shells out to a wrapper.
@@ -107,14 +119,7 @@ SDK-based backends shell out to a small wrapper script/binary in the adapter's l
 
 gh-pm delegates work by writing a **task file** into a workspace directory. A workflow picks it up, does the work, and writes a **result file**. gh-pm watches for results.
 
-```
-$GH_PM_WORKSPACE/
-  <task-id>/
-    task.json        # written by gh-pm
-    status.json      # written by workflow (updated as work progresses)
-    result.json      # written by workflow (final output)
-    dispatch.json    # written by gh-pm (dispatch metadata)
-```
+File schemas (directory layout: see "State folder overview" above):
 
 **task.json** (written by gh-pm):
 ```json
@@ -140,8 +145,9 @@ $GH_PM_WORKSPACE/
 **result.json** (written by workflow when done):
 ```json
 {
-  "state": "done",
+  "state": "done | failed",
   "summary": "What was accomplished",
+  "error": "reason for failure (when state=failed)",
   "artifacts": ["link or path to output"],
   "completed_at": "ISO-8601"
 }
@@ -230,7 +236,7 @@ Configuration:
 ```toml
 [settings]
 log_level = "INFO"                      # default
-log_file  = "~/.gh-pm/gh-pm.log"        # optional, logs to stderr if unset
+log_file  = "~/.gh-pm/gh-pm.log"        # optional; always logs to stderr, this adds a file copy
 ```
 
 Per-task logs are also written to the task directory:
