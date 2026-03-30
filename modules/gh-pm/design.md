@@ -217,7 +217,33 @@ The module is implemented in bash. Dependencies:
 
 All provided via the module's `flake.nix`.
 
-### 7. Local testing
+### 7. Logging
+
+gh-pm logs to stderr and optionally to a file. Log lines are structured as `<timestamp> <level> <component> <message>`.
+
+Levels: `DEBUG`, `INFO`, `WARN`, `ERROR`.
+
+Components follow the internal structure: `poll`, `analyze`, `dispatch`, `monitor`, `report`.
+
+Configuration:
+
+```toml
+[settings]
+log_level = "INFO"                      # default
+log_file  = "~/.gh-pm/gh-pm.log"        # optional, logs to stderr if unset
+```
+
+Per-task logs are also written to the task directory:
+
+```
+$GH_PM_WORKSPACE/<task-id>/gh-pm.log
+```
+
+This captures everything gh-pm did for that task (LLM prompts/responses, dispatch details, status checks, GitHub comment posts). Useful for debugging a specific task without sifting through the global log.
+
+In `--dry-run` mode, log level defaults to `DEBUG` and all output goes to stderr.
+
+### 8. Local testing
 
 gh-pm supports a `--dry-run` mode that:
 
