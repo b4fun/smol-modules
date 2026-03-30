@@ -1,0 +1,116 @@
+# gh-pm configuration example
+# Copy this to ~/.gh-pm/gh-pm.toml and customize for your setup.
+
+# ============================================================================
+# Settings - Global behavior configuration
+# ============================================================================
+[settings]
+
+# repos - List of GitHub repositories to monitor for assigned tasks
+# Format: ["owner/repo-a", "owner/repo-b"]
+# gh-pm will poll these repos for issues and PRs assigned to the authenticated user
+repos = ["your-org/your-repo"]
+
+# poll_interval - Seconds between GitHub polling cycles
+# Default: 60
+# Lower values = more responsive, higher API usage
+poll_interval = 60
+
+# workflow_timeout - Timeout in seconds for workflows
+# Default: 3600 (1 hour)
+# After this time without a result.json, workflows are considered timed out and retried
+workflow_timeout = 3600
+
+# max_retries - Maximum retry attempts for timed-out workflows
+# Default: 3
+# After this many retries, the task is marked as failed
+max_retries = 3
+
+# log_level - Logging verbosity
+# Options: DEBUG, INFO, WARN, ERROR
+# Default: INFO
+log_level = "INFO"
+
+# log_file - Path to global log file
+# Optional. If unset, logs go to stderr only.
+# Supports ~ expansion for home directory
+log_file = "~/.gh-pm/gh-pm.log"
+
+# workflow_command - Command to execute when dispatching a workflow
+# Required. The task directory path is passed as the first argument.
+# Example: "/home/user/bin/my-workflow-handler"
+workflow_command = "/path/to/your/workflow-script"
+
+# ============================================================================
+# LLM Provider Profiles
+# ============================================================================
+# Define one or more LLM provider profiles. The profile named "default" is used
+# for task analysis. You can define additional profiles for different models or
+# providers, but only "default" is currently used by gh-pm.
+
+# ----------------------------------------------------------------------------
+# OpenAI (recommended for getting started)
+# ----------------------------------------------------------------------------
+[profiles.default]
+model = "gpt-4o"                          # Model identifier
+api_url = "https://api.openai.com/v1"    # API endpoint
+api_key_env = "OPENAI_API_KEY"            # Environment variable containing your API key
+
+# backend is optional - defaults to "openai" for OpenAI-compatible APIs
+# Only set this when using SDK-based adapters (e.g., "anthropic", "openai-agents")
+# backend = "openai"
+
+# ----------------------------------------------------------------------------
+# Local LLM via Ollama
+# ----------------------------------------------------------------------------
+# Uncomment to use a local model via Ollama (https://ollama.ai)
+# Run: ollama serve
+# [profiles.local]
+# model = "llama3"
+# api_url = "http://localhost:11434/v1"    # Ollama OpenAI-compatible endpoint
+# api_key_env = "OLLAMA_API_KEY"           # Can be a dummy value if Ollama doesn't require auth
+
+# ----------------------------------------------------------------------------
+# Claude via OpenRouter (OpenAI-compatible proxy)
+# ----------------------------------------------------------------------------
+# OpenRouter provides OpenAI-compatible access to many models including Claude
+# [profiles.claude-openrouter]
+# model = "anthropic/claude-sonnet-4-20250514"
+# api_url = "https://openrouter.ai/api/v1"
+# api_key_env = "OPENROUTER_API_KEY"
+
+# ----------------------------------------------------------------------------
+# Claude via Anthropic SDK (requires SDK adapter)
+# ----------------------------------------------------------------------------
+# Direct Anthropic API access (not OpenAI-compatible)
+# Requires backend="anthropic" to use SDK-based adapter
+# [profiles.claude-direct]
+# backend = "anthropic"
+# model = "claude-sonnet-4-20250514"
+# api_key_env = "ANTHROPIC_API_KEY"
+
+# ----------------------------------------------------------------------------
+# OpenAI with Agents SDK (requires SDK adapter)
+# ----------------------------------------------------------------------------
+# For using OpenAI's Agents API with specialized features
+# [profiles.openai-agents]
+# backend = "openai-agents"
+# model = "gpt-4o"
+# api_key_env = "OPENAI_API_KEY"
+
+# ============================================================================
+# Notes
+# ============================================================================
+# 
+# 1. API Keys: Store your API keys as environment variables, never in this file.
+#    Example: export OPENAI_API_KEY="sk-..."
+#
+# 2. GitHub Authentication: gh-pm uses the `gh` CLI for GitHub operations.
+#    Authenticate once with: gh auth login
+#
+# 3. Workflow Command: Your workflow script receives the task directory as $1.
+#    It should read task.json, do work, and write result.json.
+#    See README.md "Directory Protocol" for details.
+#
+# 4. Testing: Use --dry-run to test configuration without side effects:
+#    gh-pm --dry-run --once

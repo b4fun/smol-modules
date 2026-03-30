@@ -1,0 +1,34 @@
+[Unit]
+Description=gh-pm — GitHub Project Manager Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- Paths (adjust to your installation) ---
+# If installed via Nix:
+#   ExecStart=%h/.nix-profile/bin/gh-pm
+# If cloned from source (update path as needed):
+ExecStart=%h/smol-modules/modules/gh-pm/bin/gh-pm
+
+# Config and workspace (defaults shown; override as needed)
+Environment=GH_PM_CONFIG=%h/.gh-pm/gh-pm.toml
+Environment=GH_PM_WORKSPACE=%h/.gh-pm/workspace
+
+# --- API keys ---
+# Load from an environment file (recommended).
+# Create ~/.gh-pm/env with your keys, e.g.:
+#   OPENAI_API_KEY=sk-...
+#EnvironmentFile=%h/.gh-pm/env
+
+# --- Restart policy ---
+Restart=on-failure
+RestartSec=10
+
+# --- Resource limits (optional, adjust as needed) ---
+#MemoryMax=256M
+#CPUQuota=50%
+
+[Install]
+WantedBy=default.target

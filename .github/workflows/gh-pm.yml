@@ -1,0 +1,27 @@
+name: gh-pm
+
+on:
+  push:
+    paths:
+      - "modules/gh-pm/**"
+      - ".github/workflows/gh-pm.yml"
+  pull_request:
+    paths:
+      - "modules/gh-pm/**"
+      - ".github/workflows/gh-pm.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+
+      - name: Install toml2json
+        run: cargo install toml2json
+
+      - name: Run tests
+        working-directory: modules/gh-pm
+        run: bash test/run_all.sh
