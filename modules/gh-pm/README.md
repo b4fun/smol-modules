@@ -282,6 +282,79 @@ Useful for:
 - Verifying task discovery logic
 - Debugging without side effects
 
+## Running as a systemd Service
+
+For long-running deployments, install gh-pm as a systemd user service. A sample unit file is provided at [`gh-pm.service`](./gh-pm.service).
+
+### Quick Setup
+
+```bash
+# 1. Copy and edit the unit file (replace YOUR_USER with your username)
+sudo cp modules/gh-pm/gh-pm.service /etc/systemd/system/gh-pm@.service
+
+# 2. Create an environment file for API keys
+mkdir -p ~/.gh-pm
+cat > ~/.gh-pm/env <<'EOF'
+OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+EOF
+chmod 600 ~/.gh-pm/env
+
+# 3. Uncomment the EnvironmentFile line in the unit file
+sudo systemctl edit gh-pm@YOUR_USER --force
+# Add under [Service]:
+#   EnvironmentFile=/home/YOUR_USER/.gh-pm/env
+
+# 4. Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable --now gh-pm@YOUR_USER
+
+# 5. Check status and logs
+systemctl status gh-pm@YOUR_USER
+journalctl -u gh-pm@YOUR_USER -f
+```
+
+### Unit File Overview
+
+The provided `gh-pm.service` is a **template unit** (`gh-pm@.service`) — the `%i` / `%I` specifier is replaced with the username you pass after `@`:
+
+```ini
+# Instantiate for user "deploy":
+sudo systemctl start gh-pm@deploy
+# This runs as User=deploy, reads config from /home/deploy/.gh-pm/
+```
+
+Key settings in the unit file:
+
+| Directive | Purpose |
+|---|---|
+| `User=%i` | Runs as the specified user |
+| `ExecStart=` | Path to the `gh-pm` binary — adjust for your install method |
+| `Environment=GH_PM_CONFIG=...` | Config file path |
+| `Environment=GH_PM_WORKSPACE=...` | Workspace directory |
+| `EnvironmentFile=` | Load API keys from a file (recommended) |
+| `Restart=on-failure` | Auto-restart on crashes; gh-pm's startup recovery handles re-dispatch |
+| `RestartSec=10` | Wait 10s before restarting |
+
+### Environment File
+
+Store secrets in `~/.gh-pm/env` (mode `600`) rather than in the unit file:
+
+```bash
+# ~/.gh-pm/env
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GH_PM_LLM_PROFILE=default
+```
+
+### Nix-installed Binary
+
+If you installed via `nix profile install` or `nix build`, update `ExecStart` to point to the Nix store path:
+
+```ini
+ExecStart=/home/%i/.nix-profile/bin/gh-pm
+```
+
 ## Running Tests
 
 ```bash

@@ -1,0 +1,40 @@
+[Unit]
+Description=gh-pm — GitHub Project Manager Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+
+# --- Paths (adjust to your installation) ---
+# If installed via Nix:
+#   ExecStart=/home/USER/.nix-profile/bin/gh-pm
+# If cloned from source:
+ExecStart=/home/%i/smol-modules/modules/gh-pm/bin/gh-pm
+
+# Config and workspace (defaults shown; override as needed)
+Environment=GH_PM_CONFIG=/home/%i/.gh-pm/gh-pm.toml
+Environment=GH_PM_WORKSPACE=/home/%i/.gh-pm/workspace
+
+# --- API keys ---
+# Option 1: Set directly (not recommended for shared systems)
+#Environment=OPENAI_API_KEY=sk-...
+#
+# Option 2: Load from an environment file (recommended)
+#EnvironmentFile=/home/%i/.gh-pm/env
+
+# --- gh CLI auth ---
+# gh stores credentials under XDG config; make sure it's accessible
+Environment=HOME=/home/%i
+
+# --- Restart policy ---
+Restart=on-failure
+RestartSec=10
+
+# --- Resource limits (optional, adjust as needed) ---
+#MemoryMax=256M
+#CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
