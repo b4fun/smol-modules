@@ -14,6 +14,11 @@ NC='\033[0m' # No Color
 SMOL_MODULES_REPO="${SMOL_MODULES_REPO:-b4fun/smol-modules}"
 SMOL_MODULES_REF="${SMOL_MODULES_REF:-main}"
 BOOTSTRAP_TMP_DIR=""
+LOG_FILE="${LOG_FILE:-$HOME/.smol-exe-bootstrap.log}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+touch "$LOG_FILE"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -27,6 +32,7 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+log_info "Writing logs to $LOG_FILE"
 log_info "Starting smol-exe-bootstrap installation..."
 log_info "smol-modules repo: $SMOL_MODULES_REPO"
 log_info "smol-modules ref: $SMOL_MODULES_REF"
@@ -58,10 +64,9 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 ensure_repo_modules() {
-    if [[ -f "$HOME/smol-modules/modules/smol-exe/home.nix" && -f "$HOME/smol-modules/modules/gh-pm/flake.nix" ]]; then
+    if [[ -f "$HOME/smol-modules/modules/smol-exe/home.nix" ]]; then
         MODULES_DIR="$HOME/smol-modules/modules"
         SMOL_EXE_DIR="$MODULES_DIR/smol-exe"
-        GH_PM_DIR="$MODULES_DIR/gh-pm"
         log_info "Using local smol-modules checkout at: $MODULES_DIR"
         return 0
     fi
@@ -91,9 +96,8 @@ ensure_repo_modules() {
     fi
 
     SMOL_EXE_DIR="$MODULES_DIR/smol-exe"
-    GH_PM_DIR="$MODULES_DIR/gh-pm"
 
-    if [[ ! -f "$SMOL_EXE_DIR/home.nix" || ! -f "$GH_PM_DIR/flake.nix" ]]; then
+    if [[ ! -f "$SMOL_EXE_DIR/home.nix" ]]; then
         log_error "Downloaded smol-modules archive is missing required module files."
         return 1
     fi
@@ -187,11 +191,6 @@ apply_smol_profile() {
     
     if [[ ! -f "$SMOL_EXE_DIR/home.nix" ]]; then
         log_error "smol-exe profile not found at: $SMOL_EXE_DIR/home.nix"
-        return 1
-    fi
-
-    if [[ ! -f "$GH_PM_DIR/flake.nix" ]]; then
-        log_error "gh-pm flake not found at: $GH_PM_DIR/flake.nix"
         return 1
     fi
 
