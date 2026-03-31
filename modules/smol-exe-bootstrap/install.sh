@@ -11,6 +11,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+SMOL_MODULES_REPO="${SMOL_MODULES_REPO:-b4fun/smol-modules}"
+SMOL_MODULES_REF="${SMOL_MODULES_REF:-main}"
+BOOTSTRAP_TMP_DIR=""
+
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -23,20 +27,79 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODULES_DIR="$(dirname "$SCRIPT_DIR")"
-SMOL_EXE_DIR="$MODULES_DIR/smol-exe"
-
 log_info "Starting smol-exe-bootstrap installation..."
-log_info "Script directory: $SCRIPT_DIR"
-log_info "Modules directory: $MODULES_DIR"
+log_info "smol-modules repo: $SMOL_MODULES_REPO"
+log_info "smol-modules ref: $SMOL_MODULES_REF"
+
+cleanup() {
+    if [[ -n "$BOOTSTRAP_TMP_DIR" && -d "$BOOTSTRAP_TMP_DIR" ]]; then
+        rm -rf "$BOOTSTRAP_TMP_DIR"
+    fi
+}
+trap cleanup EXIT
+
+source_profile_script() {
+    local script_path="$1"
+
+    if [[ ! -e "$script_path" ]]; then
+        return 0
+    fi
+
+    set +u
+    # shellcheck source=/dev/null
+    . "$script_path"
+    set -u
+}
 
 # Check if running on Linux (exe.dev runs on Linux)
 if [[ "$(uname -s)" != "Linux" ]]; then
     log_warn "This script is designed for Linux (exe.dev). Detected: $(uname -s)"
     log_warn "Continuing anyway, but some steps may fail..."
 fi
+
+ensure_repo_modules() {
+    if [[ -f "$HOME/smol-modules/modules/smol-exe/home.nix" && -f "$HOME/smol-modules/modules/gh-pm/flake.nix" ]]; then
+        MODULES_DIR="$HOME/smol-modules/modules"
+        SMOL_EXE_DIR="$MODULES_DIR/smol-exe"
+        GH_PM_DIR="$MODULES_DIR/gh-pm"
+        log_info "Using local smol-modules checkout at: $MODULES_DIR"
+        return 0
+    fi
+
+    if ! command -v curl &> /dev/null; then
+        log_error "curl is required to fetch smol-modules."
+        return 1
+    fi
+
+    if ! command -v tar &> /dev/null; then
+        log_error "tar is required to extract smol-modules."
+        return 1
+    fi
+
+    BOOTSTRAP_TMP_DIR="$(mktemp -d)"
+    local archive_url="https://codeload.github.com/${SMOL_MODULES_REPO}/tar.gz/refs/heads/${SMOL_MODULES_REF}"
+    local archive_path="${BOOTSTRAP_TMP_DIR}/smol-modules.tar.gz"
+
+    log_info "Fetching smol-modules (${SMOL_MODULES_REPO}@${SMOL_MODULES_REF})..."
+    curl -fsSL "$archive_url" -o "$archive_path"
+    tar -xzf "$archive_path" -C "$BOOTSTRAP_TMP_DIR"
+
+    MODULES_DIR="$(find "$BOOTSTRAP_TMP_DIR" -mindepth 2 -maxdepth 2 -type d -name modules | head -n1)"
+    if [[ -z "$MODULES_DIR" ]]; then
+        log_error "Failed to locate modules/ in downloaded smol-modules archive."
+        return 1
+    fi
+
+    SMOL_EXE_DIR="$MODULES_DIR/smol-exe"
+    GH_PM_DIR="$MODULES_DIR/gh-pm"
+
+    if [[ ! -f "$SMOL_EXE_DIR/home.nix" || ! -f "$GH_PM_DIR/flake.nix" ]]; then
+        log_error "Downloaded smol-modules archive is missing required module files."
+        return 1
+    fi
+
+    log_info "Using downloaded smol-modules checkout at: $MODULES_DIR"
+}
 
 # Step 1: Install Nix if not already installed
 install_nix() {
@@ -59,7 +122,7 @@ install_nix() {
     
     # Source the Nix profile
     if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
-        . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+        source_profile_script '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
         log_info "Nix daemon profile sourced"
     fi
     
@@ -77,7 +140,7 @@ install_home_manager() {
     # First, ensure Nix is available in the current session
     if ! command -v nix &> /dev/null; then
         if [ -e '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' ]; then
-            . '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
+            source_profile_script '/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh'
         fi
     fi
 
@@ -101,9 +164,7 @@ install_home_manager() {
     nix-shell '<home-manager>' -A install
     
     # Source the Home Manager session variables
-    if [ -e "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh" ]; then
-        . "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
-    fi
+    source_profile_script "$HOME/.nix-profile/etc/profile.d/hm-session-vars.sh"
     
     # Verify installation
     if command -v home-manager &> /dev/null; then
@@ -114,28 +175,7 @@ install_home_manager() {
     fi
 }
 
-# Step 3: Install gh-pm from the repository
-install_gh_pm() {
-    log_info "Installing gh-pm from repository..."
-    
-    local GH_PM_DIR="$MODULES_DIR/gh-pm"
-    
-    if [ ! -f "$GH_PM_DIR/install.sh" ]; then
-        log_error "gh-pm install script not found at: $GH_PM_DIR/install.sh"
-        return 1
-    fi
-    
-    # Create gh-pm directory if it doesn't exist
-    mkdir -p "$HOME/.gh-pm"
-    
-    # Install gh-pm as a systemd service
-    log_info "Running gh-pm install script..."
-    bash "$GH_PM_DIR/install.sh" --exec-start "$GH_PM_DIR/bin/gh-pm"
-    
-    log_info "gh-pm successfully installed!"
-}
-
-# Step 4: Apply the smol-exe Nix profile
+# Step 3: Apply the smol-exe Nix profile
 apply_smol_profile() {
     log_info "Applying smol-exe Nix profile..."
     
@@ -145,12 +185,16 @@ apply_smol_profile() {
         return 1
     fi
     
-    # Check if the smol-exe home.nix exists
-    if [ ! -f "$SMOL_EXE_DIR/home.nix" ]; then
+    if [[ ! -f "$SMOL_EXE_DIR/home.nix" ]]; then
         log_error "smol-exe profile not found at: $SMOL_EXE_DIR/home.nix"
         return 1
     fi
-    
+
+    if [[ ! -f "$GH_PM_DIR/flake.nix" ]]; then
+        log_error "gh-pm flake not found at: $GH_PM_DIR/flake.nix"
+        return 1
+    fi
+
     # Create or update the Home Manager configuration directory
     local HM_CONFIG_DIR="$HOME/.config/home-manager"
     mkdir -p "$HM_CONFIG_DIR"
@@ -161,18 +205,20 @@ apply_smol_profile() {
         cp "$HM_CONFIG_DIR/home.nix" "$HM_CONFIG_DIR/home.nix.backup"
     fi
     
-    # Copy the smol-exe profile
+    # Copy the repo profile so the repo remains the source of truth.
     log_info "Copying smol-exe profile to $HM_CONFIG_DIR/home.nix"
     cp "$SMOL_EXE_DIR/home.nix" "$HM_CONFIG_DIR/home.nix"
     
     # Apply the Home Manager configuration
     log_info "Activating Home Manager configuration..."
-    home-manager switch
+    SMOL_MODULES_REPO="$SMOL_MODULES_REPO" \
+      SMOL_MODULES_REF="$SMOL_MODULES_REF" \
+      home-manager switch --extra-experimental-features 'nix-command flakes'
     
     log_info "smol-exe profile successfully applied!"
 }
 
-# Step 5: Verify installation
+# Step 4: Verify installation
 verify_installation() {
     log_info "Verifying installation..."
     
@@ -216,15 +262,17 @@ verify_installation() {
     fi
     
     # Check gh-pm
-    if [ -f "$HOME/.config/systemd/user/gh-pm.service" ]; then
-        log_info "✓ gh-pm service installed"
+    if command -v gh-pm &> /dev/null; then
+        log_info "✓ gh-pm: $(command -v gh-pm)"
     else
-        log_warn "✗ gh-pm service not found"
+        log_warn "✗ gh-pm is not installed or not in PATH (may require shell restart)"
     fi
     
     # Check Git configuration
-    local git_user=$(git config --global user.name 2>/dev/null || echo "")
-    local git_email=$(git config --global user.email 2>/dev/null || echo "")
+    local git_user
+    local git_email
+    git_user="$(git config user.name 2>/dev/null || echo "")"
+    git_email="$(git config user.email 2>/dev/null || echo "")"
     
     if [[ "$git_user" == "smol" ]]; then
         log_info "✓ Git user.name: $git_user"
@@ -254,7 +302,14 @@ main() {
     log_info "smol-exe-bootstrap Installation Script"
     log_info "========================================"
     echo ""
-    
+
+    ensure_repo_modules || {
+        log_error "Failed to resolve smol-modules repository contents. Aborting."
+        exit 1
+    }
+
+    echo ""
+
     # Run installation steps
     install_nix || {
         log_error "Nix installation failed. Aborting."
@@ -271,11 +326,6 @@ main() {
     apply_smol_profile || {
         log_error "Failed to apply smol-exe profile. Aborting."
         exit 1
-    }
-    
-    echo ""
-    install_gh_pm || {
-        log_warn "gh-pm installation failed. Continuing anyway..."
     }
     
     echo ""

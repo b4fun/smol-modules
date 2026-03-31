@@ -1,5 +1,17 @@
 { config, pkgs, ... }:
 
+let
+  ghPmFlakeRef =
+    let
+      envRef = builtins.getEnv "SMOL_EXE_GH_PM_FLAKE";
+      repo = builtins.getEnv "SMOL_MODULES_REPO";
+      ref = builtins.getEnv "SMOL_MODULES_REF";
+      repoPart = if repo != "" then repo else "b4fun/smol-modules";
+      refPart = if ref != "" then "/" + ref else "";
+    in if envRef != "" then envRef else "github:" + repoPart + refPart + "?dir=modules/gh-pm";
+  ghPmPackage = (builtins.getFlake ghPmFlakeRef).packages.${pkgs.stdenv.hostPlatform.system}.default;
+in
+
 {
   # Home Manager needs a bit of information about you and the
   # paths it should manage.
@@ -20,6 +32,7 @@
     go_1_25
     nodejs_22  # Node.js 22
     python314  # Python 3.14
+    ghPmPackage  # GitHub Project Manager agent
     gh  # GitHub CLI
     jq  # JSON processor
     toml2json  # TOML to JSON converter
@@ -28,8 +41,10 @@
   # Git configuration
   programs.git = {
     enable = true;
-    userName = "smol";
-    userEmail = "smol@ss.isbuild.ing";
+    settings.user = {
+      name = "smol";
+      email = "smol@ss.isbuild.ing";
+    };
   };
 
   # gh-pm configuration directory (empty repo settings, can be edited on demand)
