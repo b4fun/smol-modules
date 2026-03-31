@@ -157,6 +157,145 @@ backend = "shelley"
 model = "claude-sonnet-4.5"
 ```
 
+## Summary Attachments in GitHub Comments
+
+By default, gh-pm posts minimal status comments to GitHub issues. You can optionally enable **summary attachments** to include detailed analysis breakdowns and execution progress directly in the comments.
+
+### Configuration
+
+Add these settings to your `~/.gh-pm/gh-pm.toml`:
+
+```toml
+[settings]
+# Enable summary attachments (default: false)
+attach_summaries = true
+
+# Include LLM analysis breakdown in dispatch comments (default: true when attach_summaries=true)
+summary_analyze = true
+
+# Include execution progress in status update comments (default: true when attach_summaries=true)
+summary_running = true
+
+# Summary display format: "detailed" or "compact" (default: "detailed")
+summary_format = "detailed"
+
+# Wrap summaries in collapsible <details> sections (default: true)
+summary_use_collapsible = true
+
+# Maximum summary length in characters (default: 10000)
+summary_max_length = 10000
+```
+
+### What Gets Included
+
+**Analysis Summaries** (when `summary_analyze = true`):
+- Added to the "Task Dispatched" comment
+- Contains the full LLM-generated analysis from `task.json`
+- Includes task interpretation, sub-tasks, dependencies, and approach
+- Wrapped in collapsible `<details>` section by default
+
+**Running Summaries** (when `summary_running = true`):
+- Added to "Task In Progress" comments  
+- Contains the `summary` field from `status.json` if present
+- Shows completed steps, current status, remaining work
+- Useful for tracking workflow execution progress
+
+### Example: Dispatched Comment With Analysis
+
+```markdown
+## 🤖 gh-pm: Task Dispatched
+
+| Field | Value |
+|-------|-------|
+| Task ID | `owner-repo-issue-42` |
+| Status | ⏳ Running |
+| Started | 2026-03-31 10:00:00 UTC |
+
+_Managed by gh-pm. Updates will follow._
+
+### 📋 Analysis
+
+<details>
+<summary>View Analysis Details</summary>
+
+# 🎯 Project Manager Analysis: Issue #42
+
+## Issue Summary
+**Feature Request**: Add new API endpoint...
+
+## Sub-Task Breakdown
+
+### Task 1: Requirements Definition
+- Define API contract
+- Document input/output schemas
+...
+
+</details>
+```
+
+### Example: Status Update With Running Summary
+
+```markdown
+## 🤖 gh-pm: Task In Progress
+
+| Field | Value |
+|-------|-------|
+| Task ID | `owner-repo-issue-42` |
+| Status | ⏳ Running |
+| Updated | 2026-03-31 10:15:00 UTC |
+
+### Progress
+
+Executing workflow step 3 of 5
+
+### 📈 Execution Summary
+
+<details>
+<summary>View Execution Details</summary>
+
+## Execution Progress
+
+**Completed**: 
+- ✓ Step 1: Requirements analyzed
+- ✓ Step 2: Implementation started
+
+**Current**: 
+- ⏳ Step 3: Writing tests
+
+**Remaining**:
+- Step 4: Code review
+- Step 5: Documentation
+
+</details>
+```
+
+### When to Enable
+
+**Enable summaries when:**
+- You want full visibility into task analysis and progress
+- Your team reviews GitHub comments for context
+- You're debugging workflow execution
+- You need audit trails of agent reasoning
+
+**Keep summaries disabled when:**
+- You prefer minimal comment threads
+- Analysis is very verbose and clutters discussions
+- You primarily track progress through other tools
+- You're concerned about GitHub API rate limits
+
+### Workflow Integration
+
+For workflows to provide running summaries, they should write a `status.json` file with a `summary` field:
+
+```json
+{
+  "message": "Executing step 3",
+  "summary": "## Execution Progress\n\n- Completed: Step 1, Step 2\n- Current: Step 3\n- Remaining: Step 4, Step 5"
+}
+```
+
+gh-pm will automatically include this summary in status update comments when `summary_running = true`.
+
 ## Using Shelley as LLM Backend
 
 On [exe.dev](https://exe.dev) VMs, you can use **shelley** as your LLM backend. Shelley is a local AI agent that runs on the same host, eliminating the need for external API keys and enabling fully offline operation.
