@@ -17,7 +17,7 @@
 
   # Development packages
   home.packages = with pkgs; [
-    go_1_23  # Go 1.23 (closest available to 1.25)
+    go_1_25
     nodejs_22  # Node.js 22
     python314  # Python 3.14
     gh  # GitHub CLI
