@@ -114,7 +114,28 @@ install_home_manager() {
     fi
 }
 
-# Step 3: Apply the smol-exe Nix profile
+# Step 3: Install gh-pm from the repository
+install_gh_pm() {
+    log_info "Installing gh-pm from repository..."
+    
+    local GH_PM_DIR="$MODULES_DIR/gh-pm"
+    
+    if [ ! -f "$GH_PM_DIR/install.sh" ]; then
+        log_error "gh-pm install script not found at: $GH_PM_DIR/install.sh"
+        return 1
+    fi
+    
+    # Create gh-pm directory if it doesn't exist
+    mkdir -p "$HOME/.gh-pm"
+    
+    # Install gh-pm as a systemd service
+    log_info "Running gh-pm install script..."
+    bash "$GH_PM_DIR/install.sh" --exec-start "$GH_PM_DIR/bin/gh-pm"
+    
+    log_info "gh-pm successfully installed!"
+}
+
+# Step 4: Apply the smol-exe Nix profile
 apply_smol_profile() {
     log_info "Applying smol-exe Nix profile..."
     
@@ -151,7 +172,7 @@ apply_smol_profile() {
     log_info "smol-exe profile successfully applied!"
 }
 
-# Step 4: Verify installation
+# Step 5: Verify installation
 verify_installation() {
     log_info "Verifying installation..."
     
@@ -192,6 +213,13 @@ verify_installation() {
         log_info "✓ Python: $(python3 --version)"
     else
         log_warn "✗ Python is not installed or not in PATH (may require shell restart)"
+    fi
+    
+    # Check gh-pm
+    if [ -f "$HOME/.config/systemd/user/gh-pm.service" ]; then
+        log_info "✓ gh-pm service installed"
+    else
+        log_warn "✗ gh-pm service not found"
     fi
     
     # Check Git configuration
@@ -243,6 +271,11 @@ main() {
     apply_smol_profile || {
         log_error "Failed to apply smol-exe profile. Aborting."
         exit 1
+    }
+    
+    echo ""
+    install_gh_pm || {
+        log_warn "gh-pm installation failed. Continuing anyway..."
     }
     
     echo ""

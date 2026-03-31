@@ -20,6 +20,9 @@
     go_1_23  # Go 1.23 (closest available to 1.25)
     nodejs_22  # Node.js 22
     python314  # Python 3.14
+    gh  # GitHub CLI
+    jq  # JSON processor
+    toml2json  # TOML to JSON converter
   ];
 
   # Git configuration
@@ -28,4 +31,21 @@
     userName = "smol";
     userEmail = "smol@ss.isbuild.ing";
   };
+
+  # gh-pm configuration directory (empty repo settings, can be edited on demand)
+  home.file.".gh-pm/gh-pm.toml".text = ''
+    [settings]
+    repos = []  # Add your repositories here
+    poll_interval = 60
+    workflow_timeout = 3600
+    max_retries = 3
+    log_level = "INFO"
+    log_file = "~/.gh-pm/gh-pm.log"
+    workflow_command = "~/.gh-pm/workflow"
+
+    [profiles.default]
+    model = "gpt-4o"
+    api_url = "https://api.openai.com/v1"
+    api_key_env = "OPENAI_API_KEY"
+  '';
 }
