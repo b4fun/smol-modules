@@ -1,0 +1,16 @@
+# Binaries
+host-status
+
+# Tests
+*_test.go
+
+# Documentation
+README.md
+AGENTS.md
+
+# Config files
+test-config.yaml
+
+# Development
+.git
+.gitignore

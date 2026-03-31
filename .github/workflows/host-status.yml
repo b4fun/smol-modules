@@ -1,0 +1,83 @@
+name: host-status
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "modules/host-status/**"
+      - ".github/workflows/host-status.yml"
+  pull_request:
+    paths:
+      - "modules/host-status/**"
+      - ".github/workflows/host-status.yml"
+
+jobs:
+  test:
+    name: Test Go Module
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/host-status
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'modules/host-status/go.mod'
+          cache-dependency-path: modules/host-status/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage to artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: modules/host-status/coverage.txt
+          retention-days: 7
+
+  lint:
+    name: Go Lint and Format Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/host-status
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'modules/host-status/go.mod'
+          cache-dependency-path: modules/host-status/go.sum
+
+      - name: Check formatting
+        run: |
+          if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not formatted:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+  shellcheck:
+    name: Validate Shell Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: 'modules/host-status/examples/providers'
+          severity: warning
+          additional_files: 'modules/host-status/install.sh'
