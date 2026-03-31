@@ -7,7 +7,7 @@ set -euo pipefail
 #   bash install.sh [OPTIONS]
 #
 # Options:
-#   --exec-start PATH   Override ExecStart path (default: installed from this flake)
+#   --exec-start PATH   Override ExecStart path (default: auto-detected from this repo)
 #   --env-file PATH     Path to environment file with API keys (default: ~/.gh-pm/env)
 #   --no-linger         Skip enabling loginctl linger
 #   --uninstall         Remove the service and disable linger
@@ -24,8 +24,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_NAME="gh-pm.service"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-WANTS_DIR="${USER_UNIT_DIR}/default.target.wants"
-PROFILE_EXEC_START="${HOME}/.nix-profile/bin/gh-pm"
 
 # Defaults
 EXEC_START=""
@@ -35,42 +33,6 @@ UNINSTALL=0
 
 show_help() {
   sed -n '/^# Usage:/,/^# Pass --no-linger/p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
-}
-
-has_user_systemd_bus() {
-  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-  [[ -S "${runtime_dir}/bus" ]]
-}
-
-configure_user_systemd_bus() {
-  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-  export XDG_RUNTIME_DIR="$runtime_dir"
-  export DBUS_SESSION_BUS_ADDRESS="unix:path=${runtime_dir}/bus"
-}
-
-enable_unit_offline() {
-  mkdir -p "$WANTS_DIR"
-  ln -sf "../${SERVICE_NAME}" "${WANTS_DIR}/${SERVICE_NAME}"
-}
-
-install_from_flake() {
-  local flake_ref="${SCRIPT_DIR}"
-  local profile_list
-
-  if ! command -v nix &>/dev/null; then
-    echo "Error: nix is required to install gh-pm from its flake." >&2
-    exit 1
-  fi
-
-  profile_list="$(nix profile list --json 2>/dev/null || echo '{}')"
-
-  if echo "$profile_list" | jq -e 'to_entries[]? | select(.value.originalUrl == $ref or .value.url == $ref)' --arg ref "$flake_ref" >/dev/null; then
-    echo "Upgrading gh-pm via nix profile from ${flake_ref}..."
-    nix profile upgrade "$flake_ref"
-  else
-    echo "Installing gh-pm via nix profile from ${flake_ref}..."
-    nix profile install "${flake_ref}" --priority 4
-  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -98,9 +60,9 @@ if [[ "$UNINSTALL" -eq 1 ]]; then
   exit 0
 fi
 
+# --- Resolve ExecStart ---
 if [[ -z "$EXEC_START" ]]; then
-  install_from_flake
-  EXEC_START="$PROFILE_EXEC_START"
+  EXEC_START="$(readlink -f "${SCRIPT_DIR}/bin/gh-pm")"
 fi
 
 if [[ ! -x "$EXEC_START" ]]; then
@@ -173,14 +135,8 @@ if [[ "$ENABLE_LINGER" -eq 1 ]]; then
 fi
 
 # --- Reload and enable ---
-if has_user_systemd_bus; then
-  configure_user_systemd_bus
-  systemctl --user daemon-reload
-  systemctl --user enable "$SERVICE_NAME"
-else
-  echo "Warning: no user systemd bus detected; enabling ${SERVICE_NAME} offline." >&2
-  enable_unit_offline
-fi
+systemctl --user daemon-reload
+systemctl --user enable "$SERVICE_NAME"
 echo ""
 echo "gh-pm service installed and enabled."
 echo ""
