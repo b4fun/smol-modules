@@ -690,6 +690,33 @@ gh-pm uses GitHub comments to track task state throughout execution. Each task g
 | **Failed** | ❌ | Process died or error | Workflow failed or crashed |
 | **Timed Out** | ⏱️ | Timeout exceeded | Workflow exceeded timeout, will retry |
 
+### Update Timing and Polling Behavior
+
+**Important:** gh-pm uses a **polling-based monitoring loop** to check task status, not real-time event-driven updates.
+
+**How it works:**
+- gh-pm checks all running tasks every `poll_interval` seconds (default: **60 seconds**)
+- When a task completes (result.json is written), the update happens on the **next poll cycle**
+- This means tracking comments may update **1-20+ minutes** after task completion
+
+**Expected delays:**
+- Fast tasks (< 1 min): Comment updates within 1-2 minutes
+- Medium tasks (5-10 min): Comment updates within 6-11 minutes  
+- Long tasks (20+ min): Comment updates within 21-22 minutes
+
+**Why delays occur:**
+```
+Task completes → result.json written
+    ↓ (up to 60 seconds)
+Monitor loop runs → detects completion
+    ↓ (< 1 second)
+Comment updated via GitHub API
+```
+
+**Configuration:** Adjust `poll_interval` in `gh-pm.toml` for faster updates (at the cost of higher API usage).
+
+**Note:** Comments are updated **in-place** (same comment ID), not replaced with new comments. Check the comment's "edited" timestamp on GitHub to see when updates occurred.
+
 ### Example Flow
 
 **1. Task Discovery** — gh-pm finds Issue #42:
