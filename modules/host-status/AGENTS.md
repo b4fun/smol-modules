@@ -37,7 +37,7 @@ Providers MAY:
 - `pusher.go`: Periodic scheduler for push model
 - `internal/server`: HTTP server for pull model
 - `internal/providers/host`: Built-in system metrics providers
-- `examples/`: Example configuration and reference providers
+- `examples/`: Example configuration files
 
 ## Development Guidelines
 
