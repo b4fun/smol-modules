@@ -14,16 +14,14 @@
         {
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
-              go_1_21
+              go_1_25
               gopls
               gotools
-              bc
-              coreutils
             ];
             shellHook = ''
               echo "host-status dev shell"
-              echo "Run 'go build' to build, or 'go run . -config examples/config.yaml' to test"
-            '';
+              echo "Run 'go build' to build, or 'go run . -config examples/config.toml' to test"
+            '};
           };
         });
 
@@ -32,7 +30,7 @@
         {
           default = pkgs.buildGoModule {
             pname = "host-status";
-            version = "0.1.0";
+            version = "0.0.1";
             src = ./.;
             vendorHash = "sha256-wJPJlebGAGEHq6UEO16rkPW7CHldKDZjJZQpauVvTog=";
             

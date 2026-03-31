@@ -34,9 +34,10 @@ Providers MAY:
 - `main.go`: Entry point, signal handling, graceful shutdown
 - `config.go`: Configuration parsing and validation
 - `provider.go`: Provider execution and registry
-- `server.go`: HTTP server for pull model
 - `pusher.go`: Periodic scheduler for push model
-- `examples/`: Example configuration and providers
+- `internal/server`: HTTP server for pull model
+- `internal/providers/host`: Built-in system metrics providers
+- `examples/`: Example configuration and reference providers
 
 ## Development Guidelines
 
@@ -47,16 +48,14 @@ Providers MAY:
 3. Update example config in `examples/config.yaml`
 4. Document in `README.md`
 
-### Testing Providers
+### Testing
 
-Run providers directly:
 ```bash
-./examples/providers/cpu.sh
-```
+# Run tests
+go test -v ./...
 
-Test with module:
-```bash
-go run . -config examples/config.yaml
+# Test with module
+go run . -config examples/config.toml
 curl http://localhost:8080/status
 ```
 

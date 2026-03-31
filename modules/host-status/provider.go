@@ -7,25 +7,9 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/b4fun/smol-modules/modules/host-status/internal/providers/host"
 )
-
-// ProviderStatus represents the status reported by a provider
-type ProviderStatus string
-
-const (
-	StatusOK    ProviderStatus = "ok"
-	StatusWarn  ProviderStatus = "warn"
-	StatusError ProviderStatus = "error"
-)
-
-// ProviderResult represents the output from a provider
-type ProviderResult struct {
-	Name      string                 `json:"name"`
-	Status    ProviderStatus         `json:"status"`
-	Metrics   map[string]interface{} `json:"metrics"`
-	Timestamp time.Time              `json:"timestamp"`
-	Error     string                 `json:"error,omitempty"`
-}
 
 // Provider executes and manages status providers
 type Provider struct {
@@ -129,11 +113,11 @@ func NewProviderRegistry(configs []ProviderConfig) *ProviderRegistry {
 	providers := make([]ProviderExecutor, 0, len(configs))
 	for _, config := range configs {
 		// Check if this is a builtin provider
-		if config.Command == "" && IsBuiltinProvider(config.Name) {
+		if config.Command == "" && host.IsBuiltin(config.Name) {
 			// Use builtin provider
-			builtinProvider := GetBuiltinProvider(config.Name, config)
+			builtinProvider := host.New(config.Name, config.Args)
 			if builtinProvider != nil {
-				providers = append(providers, NewBuiltinProviderWrapper(builtinProvider, config))
+				providers = append(providers, NewBuiltinProviderAdapter(builtinProvider, config))
 				continue
 			}
 		}
@@ -141,6 +125,48 @@ func NewProviderRegistry(configs []ProviderConfig) *ProviderRegistry {
 		providers = append(providers, NewProvider(config))
 	}
 	return &ProviderRegistry{providers: providers}
+}
+
+// BuiltinProviderAdapter adapts host.Provider to ProviderExecutor
+type BuiltinProviderAdapter struct {
+	provider host.Provider
+	config   ProviderConfig
+}
+
+func NewBuiltinProviderAdapter(provider host.Provider, config ProviderConfig) *BuiltinProviderAdapter {
+	return &BuiltinProviderAdapter{
+		provider: provider,
+		config:   config,
+	}
+}
+
+func (a *BuiltinProviderAdapter) Execute(ctx context.Context) (*ProviderResult, error) {
+	timeout, err := a.config.GetParsedTimeout()
+	if err != nil {
+		return nil, fmt.Errorf("invalid timeout: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	result, err := a.provider.Execute(ctx)
+	if err != nil {
+		return &ProviderResult{
+			Name:      a.config.Name,
+			Status:    StatusError,
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+			Metrics:   make(map[string]interface{}),
+		}, nil
+	}
+
+	return &ProviderResult{
+		Name:      result.Name,
+		Status:    ProviderStatus(result.Status),
+		Metrics:   result.Metrics,
+		Error:     result.Error,
+		Timestamp: result.Timestamp,
+	}, nil
 }
 
 // ExecuteAll runs all providers and returns their results

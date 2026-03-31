@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -73,7 +74,7 @@ func (p *Pusher) push(ctx context.Context) {
 		}
 	}
 
-	hostname, _ := getHostname()
+	hostname, _ := os.Hostname()
 	payload := StatusResponse{
 		Hostname:  hostname,
 		Timestamp: time.Now(),

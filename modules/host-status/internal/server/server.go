@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -6,11 +6,42 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
-// StatusResponse represents the aggregated status response
-type StatusResponse struct {
+// ProviderStatus represents the status reported by a provider
+type ProviderStatus string
+
+const (
+	StatusOK    ProviderStatus = "ok"
+	StatusWarn  ProviderStatus = "warn"
+	StatusError ProviderStatus = "error"
+)
+
+// ProviderResult represents the output from a provider
+type ProviderResult struct {
+	Name      string                 `json:"name"`
+	Status    ProviderStatus         `json:"status"`
+	Metrics   map[string]interface{} `json:"metrics"`
+	Timestamp time.Time              `json:"timestamp"`
+	Error     string                 `json:"error,omitempty"`
+}
+
+// ProviderExecutor is the interface for anything that can execute and return provider results
+type ProviderExecutor interface {
+	ExecuteAll(ctx context.Context) []*ProviderResult
+}
+
+// Config holds server configuration
+type Config struct {
+	Enabled bool
+	Port    int
+	Host    string
+}
+
+// Response represents the aggregated status response
+type Response struct {
 	Hostname  string            `json:"hostname"`
 	Timestamp time.Time         `json:"timestamp"`
 	Providers []*ProviderResult `json:"providers"`
@@ -19,16 +50,16 @@ type StatusResponse struct {
 
 // Server handles HTTP requests for status
 type Server struct {
-	config   *PullConfig
-	registry *ProviderRegistry
+	config   *Config
+	executor ProviderExecutor
 	server   *http.Server
 }
 
-// NewServer creates a new HTTP server
-func NewServer(config *PullConfig, registry *ProviderRegistry) *Server {
+// New creates a new HTTP server
+func New(config *Config, executor ProviderExecutor) *Server {
 	return &Server{
 		config:   config,
-		registry: registry,
+		executor: executor,
 	}
 }
 
@@ -64,7 +95,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	results := s.registry.ExecuteAll(ctx)
+	results := s.executor.ExecuteAll(ctx)
 
 	// Determine overall status
 	overall := StatusOK
@@ -77,8 +108,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hostname, _ := getHostname()
-	response := StatusResponse{
+	hostname, _ := os.Hostname()
+	response := Response{
 		Hostname:  hostname,
 		Timestamp: time.Now(),
 		Providers: results,

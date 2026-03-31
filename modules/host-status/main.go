@@ -9,10 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/b4fun/smol-modules/modules/host-status/internal/server"
 )
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "Path to configuration file")
+	configPath := flag.String("config", "config.toml", "Path to configuration file")
 	flag.Parse()
 
 	if err := run(*configPath); err != nil {
@@ -44,11 +46,17 @@ func run(configPath string) error {
 	errChan := make(chan error, 2)
 
 	// Start pull server if enabled
-	var server *Server
+	var srv *server.Server
 	if config.Pull.Enabled {
-		server = NewServer(&config.Pull, registry)
+		srvConfig := &server.Config{
+			Enabled: config.Pull.Enabled,
+			Port:    config.Pull.Port,
+			Host:    config.Pull.Host,
+		}
+		adapter := &RegistryAdapter{registry: registry}
+		srv = server.New(srvConfig, adapter)
 		go func() {
-			if err := server.Start(); err != nil {
+			if err := srv.Start(); err != nil {
 				errChan <- fmt.Errorf("server error: %w", err)
 			}
 		}()
@@ -81,10 +89,10 @@ func run(configPath string) error {
 		pusher.Stop()
 	}
 
-	if server != nil {
+	if srv != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Server shutdown error: %v", err)
 		}
 	}
@@ -93,10 +101,22 @@ func run(configPath string) error {
 	return nil
 }
 
-func getHostname() (string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "unknown", err
+// RegistryAdapter adapts ProviderRegistry to server.ProviderExecutor
+type RegistryAdapter struct {
+	registry *ProviderRegistry
+}
+
+func (a *RegistryAdapter) ExecuteAll(ctx context.Context) []*server.ProviderResult {
+	results := a.registry.ExecuteAll(ctx)
+	serverResults := make([]*server.ProviderResult, len(results))
+	for i, r := range results {
+		serverResults[i] = &server.ProviderResult{
+			Name:      r.Name,
+			Status:    server.ProviderStatus(r.Status),
+			Metrics:   r.Metrics,
+			Timestamp: r.Timestamp,
+			Error:     r.Error,
+		}
 	}
-	return hostname, nil
+	return serverResults
 }

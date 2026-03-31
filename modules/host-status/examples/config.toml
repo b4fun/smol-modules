@@ -1,0 +1,46 @@
+# Host Status Configuration
+
+# Pull-based HTTP server
+[pull]
+enabled = true
+host = "0.0.0.0"
+port = 8080
+
+# Push-based periodic reporting
+[push]
+enabled = true
+interval = "5m"
+
+[[push.destinations]]
+url = "https://monitoring.example.com/api/status"
+auth = "Bearer your-token-here"
+
+[push.destinations.headers]
+X-Host-ID = "server-001"
+
+# Built-in providers
+[[providers]]
+name = "cpu"
+timeout = "10s"
+
+[[providers]]
+name = "memory"
+timeout = "10s"
+
+[[providers]]
+name = "disk"
+timeout = "10s"
+# args = ["/data"]  # Optional: custom disk path
+
+[[providers]]
+name = "uptime"
+timeout = "10s"
+
+# External provider example
+# [[providers]]
+# name = "custom"
+# command = "/usr/local/bin/custom-monitor"
+# args = ["--format", "json"]
+# timeout = "30s"
+# [providers.env]
+# MONITOR_CONFIG = "/etc/monitor/config.json"
