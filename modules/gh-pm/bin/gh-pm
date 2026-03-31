@@ -184,7 +184,6 @@ monitor_inflight() {
     [[ ! -d "$task_dir" ]] && continue
     [[ ! -f "$task_dir/task.json" ]] && continue
     [[ ! -f "$task_dir/dispatch.json" ]] && continue
-    [[ -f "$task_dir/result.json" ]] && continue  # already done
 
     local task_id repo number
     task_id="$(basename "$task_dir")"
@@ -200,13 +199,39 @@ monitor_inflight() {
     case "$status" in
       done)
         log_info "monitor" "Task $task_id completed"
-        report_completion "$repo" "$number" "$task_id" "$task_dir/result.json" || true
+        # Check if completion already reported
+        local comment_id body
+        comment_id="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
+        if [[ -n "$comment_id" ]]; then
+          body="$(gh api "repos/${repo}/issues/comments/${comment_id}" --jq '.body' 2>/dev/null || echo '')"
+          if echo "$body" | grep -q 'Completed\|Failed'; then
+            log_debug "monitor" "Task $task_id completion already reported"
+          else
+            report_completion "$repo" "$number" "$task_id" "$task_dir/result.json" || true
+          fi
+        else
+          report_completion "$repo" "$number" "$task_id" "$task_dir/result.json" || true
+        fi
         ;;
       failed)
         log_warn "monitor" "Task $task_id failed"
-        local err=""
-        [[ -f "$task_dir/result.json" ]] && err="$(jq -r '.error // "Unknown error"' "$task_dir/result.json")"
-        report_failure "$repo" "$number" "$task_id" "${err:-Workflow process exited without result}" || true
+        # Check if failure already reported
+        local comment_id body
+        comment_id="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
+        if [[ -n "$comment_id" ]]; then
+          body="$(gh api "repos/${repo}/issues/comments/${comment_id}" --jq '.body' 2>/dev/null || echo '')"
+          if echo "$body" | grep -q 'Completed\|Failed'; then
+            log_debug "monitor" "Task $task_id failure already reported"
+          else
+            local err=""
+            [[ -f "$task_dir/result.json" ]] && err="$(jq -r '.error // "Unknown error"' "$task_dir/result.json")"
+            report_failure "$repo" "$number" "$task_id" "${err:-Workflow process exited without result}" || true
+          fi
+        else
+          local err=""
+          [[ -f "$task_dir/result.json" ]] && err="$(jq -r '.error // "Unknown error"' "$task_dir/result.json")"
+          report_failure "$repo" "$number" "$task_id" "${err:-Workflow process exited without result}" || true
+        fi
         ;;
       timeout)
         log_warn "monitor" "Task $task_id timed out"
