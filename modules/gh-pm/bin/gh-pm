@@ -169,7 +169,7 @@ ${comments_text}"
 
   # Dispatch workflow
   if dispatch_task "$task_dir"; then
-    report_dispatch "$repo" "$number" "$task_id" || true
+    report_dispatch "$repo" "$number" "$task_id" "$task_dir" || true
   else
     log_error "dispatch" "Failed to dispatch $task_id"
     rm -rf "$task_dir"
@@ -224,7 +224,7 @@ monitor_inflight() {
           msg="$(jq -r '.message // ""' "$task_dir/status.json" 2>/dev/null)"
           if [[ -n "$msg" ]]; then
             log_debug "monitor" "Task $task_id status: $msg"
-            report_status "$repo" "$number" "$task_id" "$msg" || true
+            report_status "$repo" "$number" "$task_id" "$msg" "$task_dir" || true
           fi
         fi
         ;;
@@ -355,7 +355,7 @@ Produce a plan to address the review feedback."
       }' > "$task_dir/task.json"
 
     if dispatch_task "$task_dir"; then
-      report_dispatch "$repo" "$number" "$task_id" || true
+      report_dispatch "$repo" "$number" "$task_id" "$task_dir" || true
     else
       log_error "dispatch" "Failed to dispatch $task_id"
       rm -rf "$task_dir"
@@ -484,7 +484,7 @@ Produce a plan to investigate and fix the CI failures. The workflow agent will h
     }' > "$task_dir/task.json"
 
   if dispatch_task "$task_dir"; then
-    report_dispatch "$repo" "$number" "$task_id" || true
+    report_dispatch "$repo" "$number" "$task_id" "$task_dir" || true
   else
     log_error "dispatch" "Failed to dispatch $task_id"
     rm -rf "$task_dir"

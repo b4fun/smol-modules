@@ -62,6 +62,12 @@ log_level = "INFO"                          # Optional: DEBUG|INFO|WARN|ERROR (d
 log_file = "~/.gh-pm/gh-pm.log"            # Optional: path to global log file (default: stderr only)
 workflow_command = "/path/to/script"        # Required: command to dispatch workflows
 workflow_policy = "..."                     # Optional: guardrails for the workflow agent
+attach_summaries = false                    # Optional: enable detailed summaries in GitHub comments (default: false)
+summary_analyze = true                      # Optional: include LLM analysis in dispatch comments (default: true)
+summary_running = false                     # Optional: include detailed running status (default: false)
+summary_completion = true                   # Optional: include enhanced completion details (default: true)
+summary_use_collapsible = true              # Optional: wrap summaries in collapsible sections (default: true)
+summary_max_length = 5000                   # Optional: max summary length before truncation (default: 5000)
 ```
 
 **Field details:**
@@ -74,6 +80,12 @@ workflow_policy = "..."                     # Optional: guardrails for the workf
 - **`log_file`** (string, optional): Path to global log file. If unset, logs go to stderr. Expands `~` to home directory.
 - **`workflow_command`** (string, required): Command to execute when dispatching a workflow. Receives the task directory path as an argument.
 - **`workflow_policy`** (string, optional): Policy rules injected into the workflow agent prompt. Used by `gh-pm-shelley-handler` to constrain what the agent is allowed to do. If unset, a safe default policy is applied that prevents merging PRs, pushing to main, and other destructive actions. See [Workflow Policy](#workflow-policy) below.
+- **`attach_summaries`** (boolean, default: false): Enable detailed summaries in GitHub tracking comments. When disabled, comments contain only basic status information. When enabled, gh-pm includes additional details based on the `summary_*` settings below.
+- **`summary_analyze`** (boolean, default: true): When `attach_summaries` is enabled, controls whether the LLM analysis from `task.json` is included in the initial "Task Dispatched" comment. The analysis is wrapped in a collapsible section if `summary_use_collapsible` is enabled.
+- **`summary_running`** (boolean, default: false): When `attach_summaries` is enabled, controls whether detailed running status from `status.json` is included in "Task In Progress" comments. This extracts all fields from `status.json` and displays them in a structured format. Note: This can make comments verbose if your workflow writes detailed status updates.
+- **`summary_completion`** (boolean, default: true): When `attach_summaries` is enabled, controls whether enhanced completion details (artifacts, completion timestamps) are included in the final "Task Completed" comment.
+- **`summary_use_collapsible`** (boolean, default: true): When enabled, long summaries are wrapped in collapsible `<details>` sections to keep GitHub comments compact. Particularly useful for lengthy LLM analyses.
+- **`summary_max_length`** (integer, default: 5000): Maximum length of summary content (in characters) before truncation. Summaries longer than this are truncated to avoid overly large comments that can slow down GitHub's UI. Set to a higher value if you need more verbose summaries.
 
 ### Workflow Policy
 
@@ -776,6 +788,130 @@ Tracking comments are **updated in place** rather than creating new comments:
 - **On timeout**: Comment is updated with retry information
 
 This keeps the issue/PR thread clean with a single status comment per task.
+
+### Summary Attachments
+
+By default, tracking comments contain only basic metadata (task ID, status, timestamps). When `attach_summaries = true` is set in the configuration, gh-pm can include detailed summaries at each stage:
+
+#### Analysis Summary (`summary_analyze = true`)
+
+When dispatching a task, the LLM-generated analysis from `task.json` is included in the comment:
+
+```markdown
+<!-- gh-pm:owner-repo-issue-42 -->
+## 🤖 gh-pm: Task Dispatched
+
+| Field | Value |
+|-------|-------|
+| Task ID | `owner-repo-issue-42` |
+| Status | ⏳ Running |
+| Started | 2026-03-31 10:00:05 UTC |
+
+### 📋 Analysis
+
+<details>
+<summary>View Analysis Details</summary>
+
+## Task Breakdown
+
+**Objective**: Add user authentication feature
+
+### Sub-tasks:
+1. Create login form component
+2. Implement authentication API
+3. Add session management
+4. Write integration tests
+
+**Estimated complexity**: Medium
+**Dependencies**: Database migration must run first
+
+</details>
+
+_Managed by gh-pm._
+```
+
+The analysis is wrapped in a collapsible `<details>` section (if `summary_use_collapsible = true`) to keep comments compact.
+
+#### Running Status Summary (`summary_running = true`)
+
+When the workflow writes progress updates to `status.json`, gh-pm can extract and display all fields:
+
+```markdown
+<!-- gh-pm:owner-repo-issue-42 -->
+## 🤖 gh-pm: Task In Progress
+
+| Field | Value |
+|-------|-------|
+| Task ID | `owner-repo-issue-42` |
+| Status | ⏳ Running |
+| Updated | 2026-03-31 10:02:00 UTC |
+
+### Progress
+
+Running tests...
+
+### 📊 Running Details
+
+**State**: `running`  
+**Last Updated**: 2026-03-31T10:02:00Z  
+**COMPLETED STEPS**: 3  
+**TOTAL STEPS**: 5  
+**CURRENT STEP**: Integration tests
+
+_Managed by gh-pm._
+```
+
+This extracts all fields from `status.json` (except `message` and `state`) and formats them with human-readable labels.
+
+**Note**: Running summaries can make comments verbose if your workflow writes detailed status updates. Consider using `summary_running = false` for cleaner comments.
+
+#### Completion Summary (`summary_completion = true`)
+
+When the task completes, gh-pm includes any artifacts and completion timestamps from `result.json`:
+
+```markdown
+<!-- gh-pm:owner-repo-issue-42 -->
+## 🤖 gh-pm: Task Completed
+
+| Field | Value |
+|-------|-------|
+| Task ID | `owner-repo-issue-42` |
+| Status | ✅ Completed |
+| Finished | 2026-03-31 10:05:00 UTC |
+
+### Summary
+
+Successfully implemented authentication feature:
+- Login form created at `src/components/Login.tsx`
+- API endpoints added to `api/auth.go`
+- Session management in place
+- 15 integration tests passing
+
+### 📦 Artifacts
+
+Pull Request: https://github.com/owner/repo/pull/123  
+Test Report: https://ci.example.com/builds/456
+
+**Completed At**: 2026-03-31T10:05:00Z
+
+_Managed by gh-pm._
+```
+
+#### Configuration
+
+To enable summary attachments, add to your `gh-pm.toml`:
+
+```toml
+[settings]
+attach_summaries = true          # Enable summary attachments
+summary_analyze = true           # Include LLM analysis in dispatch comments
+summary_running = false          # Include running status details (can be verbose)
+summary_completion = true        # Include artifacts and timestamps in completion
+summary_use_collapsible = true   # Wrap in <details> tags to keep compact
+summary_max_length = 5000        # Truncate summaries longer than this
+```
+
+**Defaults**: All summaries are disabled by default (`attach_summaries = false`) to keep comments minimal. Enable them if you want more visibility into task execution.
 
 ### Recovery After Restart
 

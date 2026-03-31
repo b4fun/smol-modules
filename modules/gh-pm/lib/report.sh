@@ -2,6 +2,8 @@
 # gh-pm/lib/report.sh — GitHub reporting
 # Posts and updates tracking comments on issues/PRs.
 
+# Note: _format_summary and _get_summary_settings are defined in config.sh
+
 # report_analyzing REPO NUMBER TASK_ID PROFILE
 report_analyzing() {
   local repo="$1" number="$2" task_id="$3" profile="${4:-default}"
@@ -25,9 +27,9 @@ _Analyzing with LLM before dispatching workflow…_"
   gh_post_comment "$repo" "$number" "$body"
 }
 
-# report_dispatch REPO NUMBER TASK_ID
+# report_dispatch REPO NUMBER TASK_ID [TASK_DIR]
 report_dispatch() {
-  local repo="$1" number="$2" task_id="$3"
+  local repo="$1" number="$2" task_id="$3" task_dir="${4:-}"
   local marker="<!-- gh-pm:${task_id} -->"
   local ts
   ts="$(date -u +%Y-%m-%d\ %H:%M:%S\ UTC)"
@@ -43,6 +45,24 @@ report_dispatch() {
 
 _Managed by gh-pm. Updates will follow._"
 
+  # Add analysis summary if enabled and task.json exists
+  if [[ -n "$task_dir" ]] && [[ -f "${task_dir}/task.json" ]]; then
+    local settings analysis_content
+    read -r attach_summaries summary_analyze _ _ summary_use_collapsible summary_max_length <<< "$(_get_summary_settings)"
+    
+    if [[ "$attach_summaries" == "true" ]] && [[ "$summary_analyze" == "true" ]]; then
+      analysis_content="$(jq -r '.analysis // ""' "${task_dir}/task.json" 2>/dev/null)"
+      
+      if [[ -n "$analysis_content" ]]; then
+        body="${body}
+
+### 📋 Analysis
+
+$(_format_summary "$analysis_content" "$summary_max_length" "$summary_use_collapsible" "View Analysis Details")"
+      fi
+    fi
+  fi
+
   log_info "report" "Posting dispatch comment $repo#$number task=$task_id"
   local comment_id
   comment_id="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
@@ -53,9 +73,9 @@ _Managed by gh-pm. Updates will follow._"
   fi
 }
 
-# report_status REPO NUMBER TASK_ID STATUS_MSG
+# report_status REPO NUMBER TASK_ID STATUS_MSG [TASK_DIR]
 report_status() {
-  local repo="$1" number="$2" task_id="$3" status_msg="$4"
+  local repo="$1" number="$2" task_id="$3" status_msg="$4" task_dir="${5:-}"
   local comment_id
   comment_id="$(gh_find_tracking_comment "$repo" "$number" "$task_id")"
   if [[ -z "$comment_id" ]]; then
@@ -78,7 +98,29 @@ report_status() {
 
 ### Progress
 
-${status_msg}
+${status_msg}"
+
+  # Add running summary if enabled and status.json exists
+  if [[ -n "$task_dir" ]] && [[ -f "${task_dir}/status.json" ]]; then
+    local attach_summaries summary_running summary_use_collapsible summary_max_length
+    read -r attach_summaries _ summary_running _ summary_use_collapsible summary_max_length <<< "$(_get_summary_settings)"
+    
+    if [[ "$attach_summaries" == "true" ]] && [[ "$summary_running" == "true" ]]; then
+      # Extract summary from status.json if present
+      local status_content
+      status_content="$(jq -r '.summary // ""' "${task_dir}/status.json" 2>/dev/null)"
+      
+      if [[ -n "$status_content" ]]; then
+        body="${body}
+
+### 📈 Execution Summary
+
+$(_format_summary "$status_content" "$summary_max_length" "$summary_use_collapsible" "View Execution Details")"
+      fi
+    fi
+  fi
+
+  body="${body}
 
 _Managed by gh-pm._"
 
@@ -122,7 +164,36 @@ report_completion() {
 ### Summary
 
 ${summary}
-${error_section}
+${error_section}"
+
+  # Add enhanced completion summary if enabled
+  local attach_summaries summary_completion summary_use_collapsible summary_max_length
+  read -r attach_summaries _ _ summary_completion summary_use_collapsible summary_max_length <<< "$(_get_summary_settings)"
+  
+  if [[ "$attach_summaries" == "true" ]]; then
+    # Include artifacts if present
+    local artifacts
+    artifacts="$(jq -r '.artifacts // [] | join("\n")' "$result_path" 2>/dev/null)"
+    if [[ -n "$artifacts" ]] && [[ "$artifacts" != "null" ]]; then
+      body="${body}
+
+### 📦 Artifacts
+
+${artifacts}"
+    fi
+    
+    # Include completed_at timestamp if present
+    local completed_at
+    completed_at="$(jq -r '.completed_at // ""' "$result_path" 2>/dev/null)"
+    if [[ -n "$completed_at" ]] && [[ "$completed_at" != "null" ]]; then
+      body="${body}
+
+**Completed At**: ${completed_at}"
+    fi
+  fi
+
+  body="${body}
+
 _Managed by gh-pm._"
 
   log_info "report" "Reporting completion $repo#$number task=$task_id state=$state"

@@ -55,6 +55,42 @@ workflow_command = "/path/to/your/workflow-script"
 #
 # workflow_policy = "Do NOT merge PRs. Do NOT push to main. Always open a PR for review."
 
+# attach_summaries - Enable attaching detailed summaries to GitHub comments
+# Default: false
+# When enabled, gh-pm will include detailed analysis and progress information
+# in GitHub tracking comments based on the summary_* settings below.
+attach_summaries = false
+
+# summary_analyze - Include LLM analysis in dispatch comments
+# Default: true
+# When attach_summaries is enabled, this controls whether the LLM analysis
+# from task.json is included in the initial "Task Dispatched" comment.
+summary_analyze = true
+
+# summary_running - Include detailed running status in progress updates
+# Default: false
+# When attach_summaries is enabled, this controls whether status.json details
+# are included in "Task In Progress" comments. Note: This can be verbose.
+summary_running = false
+
+# summary_completion - Include enhanced completion details
+# Default: true
+# When attach_summaries is enabled, this controls whether artifacts and
+# completion timestamps are included in the final "Task Completed" comment.
+summary_completion = true
+
+# summary_use_collapsible - Wrap summaries in collapsible <details> sections
+# Default: true
+# When enabled, long summaries are wrapped in collapsible sections to keep
+# GitHub comments compact. Particularly useful for lengthy LLM analyses.
+summary_use_collapsible = true
+
+# summary_max_length - Maximum length of summary content before truncation
+# Default: 5000
+# Summaries longer than this will be truncated to avoid overly large comments.
+# Set to a higher value if you need more verbose summaries.
+summary_max_length = 5000
+
 # Shelley workflow handler example:
 # If using shelley as your workflow executor, point to the bundled handler:
 # workflow_command = "/full/path/to/smol-modules/modules/gh-pm/bin/gh-pm-shelley-handler"
