@@ -9,10 +9,12 @@ let
       repoPart = if repo != "" then repo else "b4fun/smol-modules";
       refPart = if ref != "" then "/" + ref else "";
     in if envRef != "" then envRef else "github:" + repoPart + refPart + "?dir=modules/gh-pm";
-  ghPmPackage = (builtins.getFlake ghPmFlakeRef).packages.${pkgs.stdenv.hostPlatform.system}.default;
+  ghPmFlake = builtins.getFlake ghPmFlakeRef;
 in
 
 {
+  imports = [ ghPmFlake.homeManagerModules.default ];
+
   # Home Manager needs a bit of information about you and the
   # paths it should manage.
   home.username = builtins.getEnv "USER";
@@ -32,7 +34,6 @@ in
     go_1_25
     nodejs_22  # Node.js 22
     python314  # Python 3.14
-    ghPmPackage  # GitHub Project Manager agent
     gh  # GitHub CLI
     jq  # JSON processor
     toml2json  # TOML to JSON converter

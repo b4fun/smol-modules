@@ -51,5 +51,34 @@
             };
           };
         });
+
+      homeManagerModules.default = { config, pkgs, ... }:
+        let
+          ghPmPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        in
+        {
+          xdg.enable = true;
+          home.packages = [ ghPmPackage ];
+
+          systemd.user.services.gh-pm = {
+            Unit = {
+              Description = "gh-pm";
+              After = [ "network-online.target" ];
+              Wants = [ "network-online.target" ];
+            };
+
+            Service = {
+              ExecStart = "${ghPmPackage}/bin/gh-pm";
+              EnvironmentFile = "-%h/.gh-pm/env";
+              Restart = "always";
+              RestartSec = 10;
+              WorkingDirectory = "%h/.gh-pm";
+            };
+
+            Install = {
+              WantedBy = [ "default.target" ];
+            };
+          };
+        };
     };
 }
