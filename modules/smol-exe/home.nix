@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   ghPmFlakeRef =
@@ -48,20 +48,28 @@ in
     };
   };
 
-  # gh-pm configuration directory (empty repo settings, can be edited on demand)
-  home.file.".gh-pm/gh-pm.toml".text = ''
-    [settings]
-    repos = []  # Add your repositories here
-    poll_interval = 60
-    workflow_timeout = 3600
-    max_retries = 3
-    log_level = "INFO"
-    log_file = "~/.gh-pm/gh-pm.log"
-    workflow_command = "~/.gh-pm/workflow"
+  home.activation.seedGhPmConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    config_dir="$HOME/.gh-pm"
+    config_path="$config_dir/gh-pm.toml"
 
-    [profiles.default]
-    model = "gpt-4o"
-    api_url = "https://api.openai.com/v1"
-    api_key_env = "OPENAI_API_KEY"
+    mkdir -p "$config_dir"
+
+    if [[ ! -e "$config_path" ]]; then
+      cat > "$config_path" <<'EOF'
+[settings]
+repos = []  # Add your repositories here
+poll_interval = 60
+workflow_timeout = 3600
+max_retries = 3
+log_level = "INFO"
+log_file = "~/.gh-pm/gh-pm.log"
+workflow_command = "~/.gh-pm/workflow"
+
+[profiles.default]
+model = "gpt-4o"
+api_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+EOF
+    fi
   '';
 }
