@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Resolve paths ---
-GH_PM_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && cd .. && pwd)"
+GH_PM_DIR="${GH_PM_DIR:-$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && cd .. && pwd)}"
 export GH_PM_DIR
 export GH_PM_CONFIG="${GH_PM_CONFIG:-$HOME/.gh-pm/gh-pm.toml}"
 export GH_PM_WORKSPACE="${GH_PM_WORKSPACE:-$HOME/.gh-pm/workspace}"
